@@ -37,6 +37,11 @@ yarn-error.*
 # Next.js
 web/.next/
 
+# Dev/temp files
+.playwright-mcp/
+kitchen_resp.json
+.vscode/
+
 # typescript
 *.tsbuildinfo
 

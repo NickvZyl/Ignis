@@ -3,7 +3,7 @@ import type { FurnitureDef } from '../types';
 
 export const def: FurnitureDef = {
   id: 'desk', label: 'Desk', gridW: 5, gridH: 5,
-  spotDx: 2, spotDy: 5, canOverlapWall: true, drawKey: 'desk',
+  spotDx: 2, spotDy: 5, canOverlapWall: false, drawKey: 'desk',
   category: 'surface', tags: ['work'],
 };
 

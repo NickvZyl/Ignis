@@ -3,7 +3,7 @@ import type { FurnitureDef } from '../types';
 
 export const def: FurnitureDef = {
   id: 'kitchen', label: 'Kitchen', gridW: 5, gridH: 3,
-  spotDx: 2, spotDy: 3, canOverlapWall: true, drawKey: 'kitchen',
+  spotDx: 2, spotDy: 3, canOverlapWall: false, drawKey: 'kitchen',
   category: 'appliance', tags: [],
   hiResSprites: {
     0: '/furniture/kitchen-front-clean.png',

@@ -561,7 +561,19 @@ function getAssetSizes(): Record<string, AssetSize> {
   if (cachedAssetSizes && now - assetSizesCacheTime < 5000) return cachedAssetSizes;
   try {
     const raw = localStorage.getItem('ignis_asset_sizes');
-    cachedAssetSizes = raw ? JSON.parse(raw) : {};
+    const parsed = raw ? JSON.parse(raw) : {};
+    // Purge corrupted NaN entries
+    const clean: Record<string, AssetSize> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      const s = v as AssetSize;
+      if ([s.widthPx, s.heightPx, s.offsetX, s.offsetY].every(n => typeof n === 'number' && isFinite(n))) {
+        clean[k] = s;
+      }
+    }
+    if (Object.keys(clean).length !== Object.keys(parsed).length) {
+      localStorage.setItem('ignis_asset_sizes', JSON.stringify(clean));
+    }
+    cachedAssetSizes = clean;
   } catch { cachedAssetSizes = {}; }
   assetSizesCacheTime = now;
   return cachedAssetSizes!;
@@ -941,7 +953,7 @@ export default function IgnisScene() {
   const userId = useAuthStore((s) => s.user?.id);
   const { weather, fetchEnvironment } = useEnvironmentStore();
   const { nextCheckinSeconds } = useChatStore();
-  const { layout, grid, mode, setMode, moveFurniture, startDrag, endDrag, dragging, draggingRot, cycleDraggingRot, getSpot, draggingSpot, startSpotDrag, endSpotDrag, setSpotEdit, initSpots, spotsLoaded, placing, placingRot, cyclePlacingRot, addToRoom, removeFromRoom, cancelPlacing, switchSceneLayout, currentScene, resizing, resizeType, resizeGrid } = useRoomStore();
+  const { layout, grid, mode, setMode, moveFurniture, startDrag, endDrag, dragging, draggingRot, cycleDraggingRot, getSpot, draggingSpot, startSpotDrag, endSpotDrag, setSpotEdit, initSpots, spotsLoaded, placing, placingRot, cyclePlacingRot, addToRoom, removeFromRoom, cancelPlacing, switchSceneLayout, currentScene } = useRoomStore();
   const gotoFurniture = useChatStore((s) => s.gotoFurniture);
   const { activeScene, transitioning, switchScene, ignisScene, setIgnisScene } = useSceneStore();
   const activeSceneRef = useRef(activeScene);
@@ -1576,38 +1588,6 @@ export default function IgnisScene() {
         }
       }
 
-      // Resize handles for hi-res furniture (bottom-right corner of hitbox)
-      for (const placed of layout.furniture) {
-        const def = FURNITURE_DEFS[placed.id];
-        if (!def?.hiResSprites || placed.id === dragging) continue;
-        const dims = getRotatedDims(def, placed.rot ?? 0);
-        const bx = placed.gx * TILE + dims.gridW * TILE;
-        const by = placed.gy * TILE + dims.gridH * TILE;
-        // Hitbox resize handle (yellow triangle, bottom-right)
-        ctx.globalAlpha = 0.8;
-        ctx.fillStyle = '#F5D03B';
-        ctx.beginPath();
-        ctx.moveTo(bx, by);
-        ctx.lineTo(bx - 3, by);
-        ctx.lineTo(bx, by - 3);
-        ctx.closePath();
-        ctx.fill();
-
-        // Sprite resize handle (teal triangle, offset based on sprite bounds)
-        const assetSizes = getAssetSizes();
-        const saved = assetSizes[def.id];
-        if (saved) {
-          const sx = placed.gx * TILE + (saved.offsetX / SCALE) + (saved.widthPx / SCALE);
-          const sy = placed.gy * TILE + (saved.offsetY / SCALE) + (saved.heightPx / SCALE);
-          ctx.fillStyle = '#06B6D4';
-          ctx.beginPath();
-          ctx.moveTo(sx, sy);
-          ctx.lineTo(sx - 3, sy);
-          ctx.lineTo(sx, sy - 3);
-          ctx.closePath();
-          ctx.fill();
-        }
-      }
       ctx.globalAlpha = 1;
 
       // Placement ghost from inventory
@@ -1828,12 +1808,7 @@ export default function IgnisScene() {
   const draggingRotRef = useRef<FurnitureRotation>(0);
   useEffect(() => { draggingRotRef.current = draggingRot; }, [draggingRot]);
 
-  // Resize tracking
-  const resizingRef = useRef<string | null>(null);
-  const resizeTypeRef = useRef<'hitbox' | 'sprite' | null>(null);
-  const resizeStartRef = useRef<{ px: number; py: number; origW: number; origH: number; origSpriteW: number; origSpriteH: number }>({ px: 0, py: 0, origW: 0, origH: 0, origSpriteW: 0, origSpriteH: 0 });
-
-  // Unified mouse down — handles edit, spot-edit, live door clicks, resize, and inventory placement
+  // Unified mouse down — handles edit, spot-edit, live door clicks, and inventory placement
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { px, py, gx, gy } = mouseToPixel(e);
 
@@ -1883,42 +1858,6 @@ export default function IgnisScene() {
         }
       }
 
-      // Check resize handles on hi-res furniture (before drag check)
-      for (const placed of layout.furniture) {
-        const def = FURNITURE_DEFS[placed.id];
-        if (!def?.hiResSprites) continue;
-        const dims = getRotatedDims(def, placed.rot ?? 0);
-        const handleSize = 4; // pixels on internal canvas
-
-        // Hitbox resize handle: bottom-right corner of grid
-        const hbx = placed.gx * TILE + dims.gridW * TILE;
-        const hby = placed.gy * TILE + dims.gridH * TILE;
-        if (px >= hbx - handleSize && px <= hbx && py >= hby - handleSize && py <= hby) {
-          resizingRef.current = placed.id;
-          resizeTypeRef.current = 'hitbox';
-          resizeStartRef.current = { px, py, origW: dims.gridW, origH: dims.gridH, origSpriteW: 0, origSpriteH: 0 };
-          useRoomStore.setState({ resizing: placed.id, resizeType: 'hitbox' });
-          e.preventDefault();
-          return;
-        }
-
-        // Sprite resize handle: bottom-right corner of sprite bounds
-        const assetSizes = getAssetSizes();
-        const saved = assetSizes[def.id];
-        if (saved) {
-          const sx = placed.gx * TILE + (saved.offsetX / SCALE) + (saved.widthPx / SCALE);
-          const sy = placed.gy * TILE + (saved.offsetY / SCALE) + (saved.heightPx / SCALE);
-          if (px >= sx - handleSize && px <= sx && py >= sy - handleSize && py <= sy) {
-            resizingRef.current = placed.id;
-            resizeTypeRef.current = 'sprite';
-            resizeStartRef.current = { px, py, origW: dims.gridW, origH: dims.gridH, origSpriteW: saved.widthPx, origSpriteH: saved.heightPx };
-            useRoomStore.setState({ resizing: placed.id, resizeType: 'sprite' });
-            e.preventDefault();
-            return;
-          }
-        }
-      }
-
       // Drag existing furniture
       for (const placed of layout.furniture) {
         const def = FURNITURE_DEFS[placed.id];
@@ -1959,35 +1898,6 @@ export default function IgnisScene() {
     const { px, py, gx, gy } = mouseToPixel(e);
 
     if (mode === 'edit') {
-      // Resize handling
-      if (resizingRef.current && resizeTypeRef.current) {
-        const id = resizingRef.current;
-        const start = resizeStartRef.current;
-        const dpx = px - start.px;
-        const dpy = py - start.py;
-
-        if (resizeTypeRef.current === 'hitbox') {
-          // Resize hitbox in grid tiles
-          const newW = Math.max(1, Math.round(start.origW + dpx / TILE));
-          const newH = Math.max(1, Math.round(start.origH + dpy / TILE));
-          resizeGrid(id, newW, newH);
-        } else if (resizeTypeRef.current === 'sprite') {
-          // Resize sprite in display pixels
-          const def = FURNITURE_DEFS[id];
-          const img = def?.hiResSprites?.[0] ? getHiResSprite(def.hiResSprites[0]) : null;
-          const aspect = img ? img.naturalHeight / img.naturalWidth : 0.6;
-          const newW = Math.max(32, start.origSpriteW + dpx * SCALE);
-          const newH = newW * aspect;
-          const assetSizes = getAssetSizes();
-          const saved = assetSizes[id] || { widthPx: 0, heightPx: 0, offsetX: 0, offsetY: 0 };
-          const updated = { ...saved, widthPx: newW, heightPx: newH };
-          cachedAssetSizes = { ...assetSizes, [id]: updated };
-          localStorage.setItem('ignis_asset_sizes', JSON.stringify(cachedAssetSizes));
-          assetSizesCacheTime = Date.now();
-        }
-        return;
-      }
-
       if (draggingRef.current) {
         const def = FURNITURE_DEFS[draggingRef.current];
         if (def) {
@@ -2013,19 +1923,11 @@ export default function IgnisScene() {
     if (mode === 'spot-edit' && draggingSpotRef.current) {
       ghostDragRef.current = { x: px - 4, y: py - 4 };
     }
-  }, [mode, mouseToPixel, resizeGrid]);
+  }, [mode, mouseToPixel]);
 
   // Unified mouse up
   const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { px, py } = mouseToPixel(e);
-
-    // End resize
-    if (resizingRef.current) {
-      resizingRef.current = null;
-      resizeTypeRef.current = null;
-      useRoomStore.setState({ resizing: null, resizeType: null });
-      return;
-    }
 
     if (mode === 'edit' && draggingRef.current && furnitureDragRef.current) {
       const { gx, gy } = furnitureDragRef.current;
@@ -2108,12 +2010,12 @@ export default function IgnisScene() {
           GALLERY
         </a>
         <a
-          href="/dev/assets"
+          href="/dev/resize"
           target="_blank"
           className="px-2 py-1.5 rounded text-[8px] tracking-wider block"
           style={{ background: 'rgba(255,255,255,0.06)', color: '#d070d0', border: 'none', textDecoration: 'none' }}
         >
-          ASSETS
+          RESIZE
         </a>
         <a
           href="/dev/zones"

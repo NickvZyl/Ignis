@@ -58,7 +58,19 @@ export function loadGridSizes() {
   try {
     const raw = localStorage.getItem(GRID_SIZES_KEY);
     if (raw) {
-      gridSizeOverrides = JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      // Purge corrupted entries
+      gridSizeOverrides = {};
+      for (const [id, size] of Object.entries(parsed)) {
+        const s = size as { gridW: number; gridH: number };
+        if (typeof s.gridW === 'number' && isFinite(s.gridW) && s.gridW >= 1 &&
+            typeof s.gridH === 'number' && isFinite(s.gridH) && s.gridH >= 1) {
+          gridSizeOverrides[id] = s;
+        }
+      }
+      if (Object.keys(gridSizeOverrides).length !== Object.keys(parsed).length) {
+        localStorage.setItem(GRID_SIZES_KEY, JSON.stringify(gridSizeOverrides));
+      }
       // Apply to defs
       for (const [id, size] of Object.entries(gridSizeOverrides)) {
         const def = FURNITURE_DEFS[id];
@@ -211,6 +223,8 @@ export function isValidPlacement(
     if (gy < CEILING_ROWS || gy + gridH > wallRows) return false;
   } else {
     if (!def.canOverlapWall && gy < wallRows) return false;
+    // canOverlapWall items must still have their bottom edge on the floor — can't float in the wall
+    if (def.canOverlapWall && gy + gridH <= wallRows) return false;
   }
 
   // Perimeter-only: must touch left edge, right edge, or bottom edge

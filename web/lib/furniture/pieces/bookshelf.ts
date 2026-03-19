@@ -4,7 +4,7 @@ import type { FurnitureDef } from '../types';
 
 export const def: FurnitureDef = {
   id: 'bookshelf', label: 'Bookshelf', gridW: 4, gridH: 2,
-  spotDx: 2, spotDy: 2, canOverlapWall: true, drawKey: 'bookshelf',
+  spotDx: 2, spotDy: 2, canOverlapWall: false, drawKey: 'bookshelf',
   category: 'storage', tags: ['reading'],
 };
 
