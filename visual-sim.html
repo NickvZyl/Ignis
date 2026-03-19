@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ignis — Visual Language Simulator</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0F0F0F;
+    color: #FAFAFA;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 40px 20px;
+  }
+  h1 { font-size: 28px; font-weight: 600; margin-bottom: 6px; }
+  .subtitle { color: #A0A0A0; font-size: 14px; margin-bottom: 40px; }
+
+  .sim-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 48px;
+  }
+
+  .avatar-wrapper {
+    position: relative;
+    width: 140px;
+    height: 140px;
+  }
+
+  .emotion-circle {
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding-top: 10px;
+    transition: background-color 0.8s ease, box-shadow 0.6s ease;
+  }
+
+  .role-square {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    border: 2px solid #0F0F0F;
+    transition: background-color 0.8s ease, opacity 0.4s ease, transform 0.4s ease;
+  }
+
+  .role-square.hidden {
+    opacity: 0;
+    transform: scale(0);
+  }
+
+  .emotion-label {
+    font-size: 13px;
+    color: #A0A0A0;
+    font-style: italic;
+    text-align: center;
+  }
+
+  .role-label {
+    font-size: 12px;
+    color: #666;
+    text-align: center;
+    min-height: 16px;
+  }
+
+  .controls {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    width: 100%;
+    max-width: 600px;
+  }
+
+  .control-group h3 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #666;
+    margin-bottom: 12px;
+  }
+
+  .button-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 2px solid #333;
+    background: #1A1A1A;
+    color: #FAFAFA;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .btn:hover { background: #2A2A2A; }
+
+  .btn.active {
+    border-color: currentColor;
+    background: #2A2A2A;
+  }
+
+  .color-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .slider-row label {
+    width: 80px;
+    font-size: 13px;
+    color: #A0A0A0;
+  }
+
+  .slider-row input[type="range"] {
+    flex: 1;
+    accent-color: #E8748A;
+    height: 4px;
+  }
+
+  .slider-row .val {
+    width: 40px;
+    font-size: 13px;
+    color: #666;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .divider {
+    width: 100%;
+    height: 1px;
+    background: #222;
+  }
+
+  .chat-sim {
+    width: 100%;
+    max-width: 600px;
+    margin-top: 16px;
+  }
+
+  .chat-sim h3 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #666;
+    margin-bottom: 12px;
+  }
+
+  .chat-input-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .chat-input {
+    flex: 1;
+    padding: 10px 16px;
+    border-radius: 20px;
+    border: 1px solid #333;
+    background: #2A2A2A;
+    color: #FAFAFA;
+    font-size: 14px;
+    outline: none;
+  }
+
+  .chat-input:focus { border-color: #555; }
+
+  .chat-input::placeholder { color: #666; }
+
+  .send-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: #2563EB;
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .send-btn:hover { background: #3b7cf5; }
+
+  .result-bar {
+    margin-top: 12px;
+    padding: 10px 14px;
+    background: #1A1A1A;
+    border-radius: 8px;
+    border: 1px solid #333;
+    font-size: 13px;
+    color: #A0A0A0;
+    min-height: 40px;
+    line-height: 1.5;
+  }
+
+  .result-bar span { color: #FAFAFA; }
+
+  .preset-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 24px;
+  }
+
+  .preset-btn {
+    padding: 6px 14px;
+    border-radius: 16px;
+    border: 1px solid #444;
+    background: transparent;
+    color: #A0A0A0;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .preset-btn:hover { background: #1A1A1A; color: #FAFAFA; border-color: #666; }
+</style>
+</head>
+<body>
+
+<h1>Ignis Visual Language</h1>
+<p class="subtitle">7 emotions &times; 7 roles &mdash; interactive simulator</p>
+
+<div class="sim-area">
+  <div class="avatar-wrapper">
+    <div class="emotion-circle" id="circle">
+      <div class="role-square hidden" id="hat"></div>
+    </div>
+  </div>
+  <div class="emotion-label" id="emotionLabel">warm</div>
+  <div class="role-label" id="roleLabel">no hat</div>
+</div>
+
+<div class="controls">
+
+  <div class="control-group">
+    <h3>Emotion (circle color)</h3>
+    <div class="button-row" id="emotionButtons"></div>
+  </div>
+
+  <div class="control-group">
+    <h3>Role / Hat (square color &mdash; or hidden)</h3>
+    <div class="button-row" id="roleButtons"></div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="control-group">
+    <h3>Continuous dimensions</h3>
+    <div class="slider-row">
+      <label>Valence</label>
+      <input type="range" min="0" max="100" value="60" id="valence">
+      <span class="val" id="valenceVal">0.60</span>
+    </div>
+    <div class="slider-row" style="margin-top:8px">
+      <label>Arousal</label>
+      <input type="range" min="0" max="100" value="40" id="arousal">
+      <span class="val" id="arousalVal">0.40</span>
+    </div>
+    <div class="slider-row" style="margin-top:8px">
+      <label>Drift</label>
+      <input type="range" min="0" max="100" value="0" id="drift">
+      <span class="val" id="driftVal">0.00</span>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="chat-sim">
+    <h3>Test message &rarr; auto-derive emotion + role</h3>
+    <div class="chat-input-row">
+      <input class="chat-input" id="chatInput" placeholder="Type a message to see what Ignis derives..." />
+      <button class="send-btn" id="sendBtn">&#9654;</button>
+    </div>
+    <div class="result-bar" id="result">Type a message and press send to see the derived emotion &amp; role.</div>
+
+    <div class="preset-row">
+      <button class="preset-btn" data-msg="I love you so much, you always make me smile">affectionate</button>
+      <button class="preset-btn" data-msg="I need this done RIGHT NOW it's urgent">urgent task</button>
+      <button class="preset-btn" data-msg="what is the meaning of life?">curious question</button>
+      <button class="preset-btn" data-msg="remember when we talked about my childhood?">memory recall</button>
+      <button class="preset-btn" data-msg="I've been thinking about how much I've changed">reflective</button>
+      <button class="preset-btn" data-msg="can you write me a poem about the ocean?">creative task</button>
+      <button class="preset-btn" data-msg="how are you feeling today?">check-in</button>
+      <button class="preset-btn" data-msg="haha that's so funny">light chat</button>
+      <button class="preset-btn" data-msg="I feel so sad and lonely today">low mood</button>
+      <button class="preset-btn" data-msg="Let's figure out a plan for this weekend">planning</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Color definitions ──
+const EMOTION_COLORS = {
+  bright:     '#F5D03B',
+  intense:    '#D94F3D',
+  grounded:   '#3A7D44',
+  reflective: '#4A90D9',
+  deep:       '#6B4FA0',
+  warm:       '#E8748A',
+  eager:      '#F0882A',
+};
+
+const ROLE_COLORS = {
+  curious:     '#F5D03B',
+  urgent:      '#D94F3D',
+  building:    '#3A7D44',
+  thinking:    '#4A90D9',
+  remembering: '#6B4FA0',
+  caring:      '#E8748A',
+  active:      '#F0882A',
+};
+
+const EMOTION_MEANINGS = {
+  bright:     'energised, curious, engaged',
+  intense:    'passionate, urgent, heightened',
+  grounded:   'calm, stable, present',
+  reflective: 'thoughtful, processing, quiet',
+  deep:       'introspective, dreaming, distant',
+  warm:       'affectionate, close, content',
+  eager:      'motivated, ready, anticipating',
+};
+
+const ROLE_MEANINGS = {
+  curious:     'researching, exploring',
+  urgent:      'high priority, deadline-driven',
+  building:    'creating, writing, executing',
+  thinking:    'planning, reasoning',
+  remembering: 'memory retrieval, reflecting',
+  caring:      'checking in, emotional support',
+  active:      'general task execution',
+};
+
+// ── State ──
+let state = {
+  emotion: 'warm',
+  role: null,
+  valence: 0.6,
+  arousal: 0.4,
+  drift: 0.0,
+};
+
+const circle = document.getElementById('circle');
+const hat = document.getElementById('hat');
+const emotionLabel = document.getElementById('emotionLabel');
+const roleLabel = document.getElementById('roleLabel');
+
+// ── Render ──
+function render() {
+  const ec = EMOTION_COLORS[state.emotion];
+  circle.style.backgroundColor = ec;
+
+  // Glow: inverse of drift
+  const glowIntensity = 1 - state.drift;
+  const glowRadius = Math.round(20 * glowIntensity);
+  const glowAlpha = (0.5 * glowIntensity).toFixed(2);
+  circle.style.boxShadow = `0 0 ${glowRadius}px ${glowRadius / 2}px ${ec}${Math.round(glowIntensity * 80).toString(16).padStart(2,'0')}`;
+
+  if (state.role) {
+    hat.style.backgroundColor = ROLE_COLORS[state.role];
+    hat.classList.remove('hidden');
+    roleLabel.textContent = state.role + ' — ' + ROLE_MEANINGS[state.role];
+  } else {
+    hat.classList.add('hidden');
+    roleLabel.textContent = 'no hat (resting)';
+  }
+
+  emotionLabel.textContent = state.emotion + ' — ' + EMOTION_MEANINGS[state.emotion];
+
+  // Update button active states
+  document.querySelectorAll('#emotionButtons .btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.emotion === state.emotion);
+  });
+  document.querySelectorAll('#roleButtons .btn').forEach(b => {
+    const val = b.dataset.role === 'none' ? null : b.dataset.role;
+    b.classList.toggle('active', val === state.role);
+  });
+}
+
+// ── Build emotion buttons ──
+const emotionBtnContainer = document.getElementById('emotionButtons');
+for (const [name, hex] of Object.entries(EMOTION_COLORS)) {
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.dataset.emotion = name;
+  btn.style.color = hex;
+  btn.innerHTML = `<span class="color-dot" style="background:${hex}"></span>${name}`;
+  btn.onclick = () => { state.emotion = name; render(); };
+  emotionBtnContainer.appendChild(btn);
+}
+
+// ── Build role buttons ──
+const roleBtnContainer = document.getElementById('roleButtons');
+// "none" button
+const noneBtn = document.createElement('button');
+noneBtn.className = 'btn active';
+noneBtn.dataset.role = 'none';
+noneBtn.style.color = '#666';
+noneBtn.innerHTML = `<span class="color-dot" style="background:#333"></span>none`;
+noneBtn.onclick = () => { state.role = null; render(); };
+roleBtnContainer.appendChild(noneBtn);
+
+for (const [name, hex] of Object.entries(ROLE_COLORS)) {
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.dataset.role = name;
+  btn.style.color = hex;
+  btn.innerHTML = `<span class="color-dot" style="background:${hex}"></span>${name}`;
+  btn.onclick = () => { state.role = name; render(); };
+  roleBtnContainer.appendChild(btn);
+}
+
+// ── Sliders ──
+function setupSlider(id, key) {
+  const slider = document.getElementById(id);
+  const valDisplay = document.getElementById(id + 'Val');
+  slider.oninput = () => {
+    state[key] = slider.value / 100;
+    valDisplay.textContent = state[key].toFixed(2);
+    // Auto-derive when sliders change
+    state.emotion = deriveEmotion(state);
+    render();
+  };
+}
+setupSlider('valence', 'valence');
+setupSlider('arousal', 'arousal');
+setupSlider('drift', 'drift');
+
+// ── Derive emotion (mirrors emotional-engine.ts) ──
+function deriveEmotion(s) {
+  if (s.drift > 0.6) return 'reflective';
+  if (s.drift > 0.3) return 'deep';
+  if (s.arousal > 0.7 && s.valence > 0.6) return 'intense';
+  if (s.arousal > 0.5 && s.valence > 0.5) return 'bright';
+  if (s.arousal > 0.5 && s.valence < 0.4) return 'eager';
+  if (s.valence > 0.6 && s.drift < 0.2) return 'warm';
+  if (s.valence < 0.3) return 'grounded';
+  return 'grounded';
+}
+
+// ── Derive role (mirrors emotional-engine.ts) ──
+const MEMORY_KW = ['remember when', 'last time', 'you told me', 'we talked about', 'you mentioned', 'back when', 'that time', 'you said'];
+const BUILDING_KW = ['write', 'create', 'make', 'build', 'draft', 'compose', 'design', 'implement', 'develop', 'produce', 'generate', 'put together'];
+const CURIOUS_KW = ['what is', 'how does', 'why does', 'can you explain', 'tell me about', 'what do you think', 'i wonder', 'curious about', 'research'];
+const THINKING_KW = ['plan', 'figure out', 'decide', 'should i', 'strategy', 'reason', 'weigh', 'consider', 'think through', 'pros and cons', 'options'];
+const CARING_KW = ['how are you', 'are you okay', 'feeling', 'check in', 'just wanted', 'miss you', 'thinking of you', 'need to talk', 'vent', 'listen'];
+const URGENT_KW = ['urgent', 'asap', 'deadline', 'right now', 'immediately', 'hurry', 'emergency', 'critical', 'time sensitive', 'running out of time'];
+const TASK_KW = ['help', 'how do', 'can you', 'fix', 'solve', 'need to', 'do this', 'get this done', 'take care of', 'handle'];
+
+function deriveRole(msg) {
+  const l = msg.toLowerCase();
+  for (const kw of MEMORY_KW) if (l.includes(kw)) return 'remembering';
+  for (const kw of BUILDING_KW) if (l.includes(kw)) return 'building';
+  for (const kw of CURIOUS_KW) if (l.includes(kw)) return 'curious';
+  for (const kw of THINKING_KW) if (l.includes(kw)) return 'thinking';
+  for (const kw of CARING_KW) if (l.includes(kw)) return 'caring';
+  for (const kw of URGENT_KW) if (l.includes(kw)) return 'urgent';
+  for (const kw of TASK_KW) if (l.includes(kw)) return 'active';
+  return null;
+}
+
+// ── Simplified message analysis ──
+const POSITIVE = ['love','happy','great','amazing','wonderful','excited','grateful','thank','awesome','beautiful','joy','glad','fantastic','perfect','brilliant','excellent','delighted','cheerful','appreciate'];
+const NEGATIVE = ['sad','angry','frustrated','upset','anxious','worried','scared','hurt','lonely','stressed','overwhelmed','tired','exhausted','depressed','hopeless','terrible','awful','miserable'];
+
+function analyzeAndApply(msg) {
+  const l = msg.toLowerCase();
+
+  let pos = 0, neg = 0;
+  for (const kw of POSITIVE) if (l.includes(kw)) pos++;
+  for (const kw of NEGATIVE) if (l.includes(kw)) neg++;
+
+  const words = l.split(/\s+/).length;
+  const lengthBonus = Math.min(0.3, words / 100);
+
+  // Shift state
+  state.valence = clamp(state.valence + (pos - neg) * 0.1 + lengthBonus * 0.1);
+  state.arousal = clamp(state.arousal + (pos + neg) * 0.05 + lengthBonus);
+  state.drift = clamp(Math.max(0, state.drift - 0.15));
+
+  // Update sliders to match
+  document.getElementById('valence').value = Math.round(state.valence * 100);
+  document.getElementById('valenceVal').textContent = state.valence.toFixed(2);
+  document.getElementById('arousal').value = Math.round(state.arousal * 100);
+  document.getElementById('arousalVal').textContent = state.arousal.toFixed(2);
+  document.getElementById('drift').value = Math.round(state.drift * 100);
+  document.getElementById('driftVal').textContent = state.drift.toFixed(2);
+
+  state.emotion = deriveEmotion(state);
+  state.role = deriveRole(msg);
+
+  const resultEl = document.getElementById('result');
+  const roleText = state.role ? `<span>${state.role}</span> (${ROLE_MEANINGS[state.role]})` : '<span>none</span> (hat hidden)';
+  resultEl.innerHTML = `Emotion: <span>${state.emotion}</span> (${EMOTION_MEANINGS[state.emotion]})<br>Role: ${roleText}<br>V=${state.valence.toFixed(2)} A=${state.arousal.toFixed(2)} D=${state.drift.toFixed(2)}`;
+
+  render();
+}
+
+function clamp(v) { return Math.max(0, Math.min(1, v)); }
+
+// ── Chat input ──
+const chatInput = document.getElementById('chatInput');
+const sendBtn = document.getElementById('sendBtn');
+
+sendBtn.onclick = () => {
+  const msg = chatInput.value.trim();
+  if (!msg) return;
+  analyzeAndApply(msg);
+  chatInput.value = '';
+};
+
+chatInput.onkeydown = (e) => {
+  if (e.key === 'Enter') { sendBtn.click(); e.preventDefault(); }
+};
+
+// ── Preset buttons ──
+document.querySelectorAll('.preset-btn').forEach(btn => {
+  btn.onclick = () => {
+    const msg = btn.dataset.msg;
+    chatInput.value = msg;
+    analyzeAndApply(msg);
+  };
+});
+
+// ── Initial render ──
+render();
+</script>
+</body>
+</html>

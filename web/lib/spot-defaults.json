@@ -1,0 +1,106 @@
+{
+  "desk": {
+    "spotDx": 2,
+    "spotDy": 3
+  },
+  "bookshelf": {
+    "spotDx": 2,
+    "spotDy": 2
+  },
+  "couch": {
+    "spotDx": 4,
+    "spotDy": 0
+  },
+  "fireplace": {
+    "spotDx": 1,
+    "spotDy": 3
+  },
+  "clock_table": {
+    "spotDx": 1,
+    "spotDy": 1
+  },
+  "kitchen": {
+    "spotDx": 2,
+    "spotDy": 1
+  },
+  "fridge": {
+    "spotDx": -1,
+    "spotDy": 5
+  },
+  "plant": {
+    "spotDx": 2,
+    "spotDy": 1
+  },
+  "front_door": {
+    "spotDx": 1,
+    "spotDy": 1
+  },
+  "tall_plant": {
+    "spotDx": -1,
+    "spotDy": 2
+  },
+  "succulent": {
+    "spotDx": 1,
+    "spotDy": 0
+  },
+  "floor_lamp": {
+    "spotDx": -2,
+    "spotDy": 2
+  },
+  "wall_sconce": {
+    "spotDx": 0,
+    "spotDy": 2
+  },
+  "ceiling_light": {
+    "spotDx": 1,
+    "spotDy": 2
+  },
+  "window": {
+    "spotDx": 4,
+    "spotDy": 3
+  },
+  "garden_gate": {
+    "spotDx": 1,
+    "spotDy": -1
+  },
+  "farm_patch": {
+    "spotDx": 2,
+    "spotDy": 3
+  },
+  "chicken_coop": {
+    "spotDx": 1,
+    "spotDy": 3
+  },
+  "cow_pen": {
+    "spotDx": 2,
+    "spotDy": 4
+  },
+  "sheep_pen": {
+    "spotDx": 2,
+    "spotDy": 3
+  },
+  "hallway_door": {
+    "spotDx": 0,
+    "spotDy": 2
+  },
+  "bedroom_door": {
+    "spotDx": 1,
+    "spotDy": 0
+  },
+  "bed": {
+    "spotDx": 1,
+    "spotDy": 1
+  },
+  "nightstand": {
+    "spotDx": 1,
+    "spotDy": 2
+  },
+  "wardrobe": {
+    "spotDx": 1,
+    "spotDy": 4
+  },
+  "bedroom_window": {
+    "spotDx": 1,
+    "spotDy": 3
+  }
+}
