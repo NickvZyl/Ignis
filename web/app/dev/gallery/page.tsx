@@ -36,6 +36,24 @@ function useAnimatedCanvas(
     canvas.width = pw * scale;
     canvas.height = ph * scale;
 
+    // Hi-res sprite: show the image instead of procedural draw
+    const hiResSrc = def.hiResSprites?.[0] as string | undefined;
+    if (hiResSrc) {
+      const img = new Image();
+      img.src = hiResSrc;
+      img.onload = () => {
+        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+        // Fit the image maintaining aspect ratio
+        const aspect = img.naturalHeight / img.naturalWidth;
+        const dw = canvas.width;
+        const dh = dw * aspect;
+        const dy = Math.max(0, canvas.height - dh);
+        ctx.drawImage(img, 0, dy, dw, dh);
+      };
+      return;
+    }
+
+    // Procedural draw
     let animId: number;
     const draw = () => {
       const ts = performance.now();
@@ -296,10 +314,10 @@ function FocusPanel({ def, onClose }: { def: FurnitureDef; onClose: () => void }
 // ── Scene background card ──
 const BG_THUMB_SCALE = 2;
 const BG_FOCUS_SCALE = 4;
-const BG_SCENES: { id: string; label: string; scene: string; file: string }[] = [
-  { id: 'bg_room', label: 'Living Room', scene: 'room', file: 'web/lib/scene-backgrounds.ts (drawRoomFloor + drawRoomWalls)' },
+const BG_SCENES: { id: string; label: string; scene: string; file: string; imgSrc?: string }[] = [
+  { id: 'bg_room', label: 'Living Room', scene: 'room', file: 'web/public/room-bg.png', imgSrc: '/room-bg.png' },
   { id: 'bg_bedroom', label: 'Bedroom', scene: 'bedroom', file: 'web/lib/scene-backgrounds.ts (drawBedroomFloor + drawBedroomWalls)' },
-  { id: 'bg_garden', label: 'Garden', scene: 'garden', file: 'web/lib/scene-backgrounds.ts (drawGardenGround + drawGardenSky + drawGardenFence)' },
+  { id: 'bg_garden', label: 'Garden', scene: 'garden', file: 'web/public/garden-bg.png', imgSrc: '/garden-bg.png' },
 ];
 
 function BackgroundCard({ bg, selected, onSelect }: { bg: typeof BG_SCENES[0]; selected: boolean; onSelect: () => void }) {
@@ -310,6 +328,19 @@ function BackgroundCard({ bg, selected, onSelect }: { bg: typeof BG_SCENES[0]; s
     const ctx = canvas.getContext('2d')!;
     canvas.width = SCENE_W * BG_THUMB_SCALE;
     canvas.height = SCENE_H * BG_THUMB_SCALE;
+
+    if (bg.imgSrc) {
+      // Use hi-res image
+      const img = new Image();
+      img.src = bg.imgSrc;
+      img.onload = () => {
+        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      };
+      return;
+    }
+
+    // Fallback to procedural
     let animId: number;
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -320,7 +351,7 @@ function BackgroundCard({ bg, selected, onSelect }: { bg: typeof BG_SCENES[0]; s
     };
     draw();
     return () => cancelAnimationFrame(animId);
-  }, [bg.scene]);
+  }, [bg.scene, bg.imgSrc]);
 
   return (
     <div onClick={onSelect} style={{
@@ -329,7 +360,7 @@ function BackgroundCard({ bg, selected, onSelect }: { bg: typeof BG_SCENES[0]; s
       borderRadius: 4, padding: 6, cursor: 'pointer',
       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
     }}>
-      <canvas ref={canvasRef} style={{ imageRendering: 'pixelated', borderRadius: 3 }} />
+      <canvas ref={canvasRef} style={{ borderRadius: 3 }} />
       <div style={{ fontSize: 14, color: selected ? '#F59E0B' : '#aaa' }}>{bg.label}</div>
     </div>
   );

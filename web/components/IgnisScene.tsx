@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useCallback, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useCompanionStore } from '@web/stores/companion-store';
 import { useEnvironmentStore, getWeatherCategory } from '@web/stores/environment-store';
 import { useAuthStore } from '@web/stores/auth-store';
@@ -1940,8 +1941,8 @@ export default function IgnisScene() {
       const dragId = draggingSpotRef.current;
       const placed = layout.furniture.find(f => f.id === dragId);
       if (placed) {
-        const spotDx = Math.round((px - 4) / TILE - placed.gx);
-        const spotDy = Math.round((py - 4) / TILE - placed.gy);
+        const spotDx = (px - 4) / TILE - placed.gx;
+        const spotDy = (py - 4) / TILE - placed.gy;
         setSpotEdit(dragId, spotDx, spotDy);
       }
       ghostDragRef.current = null;
@@ -1964,6 +1965,7 @@ export default function IgnisScene() {
   }, [mode, placing, dragging, cyclePlacingRot, cycleDraggingRot]);
 
   const menuFont = "'Press Start 2P', monospace";
+  const [devModal, setDevModal] = useState<string | null>(null);
 
   return (
     <div className="flex flex-col items-center">
@@ -1993,46 +1995,27 @@ export default function IgnisScene() {
           {mode === 'spot-edit' ? '✓ SPOTS' : 'SPOTS'}
         </button>
         <div className="my-1" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
-        <a
-          href="/dev/editor"
-          target="_blank"
-          className="px-2 py-1.5 rounded text-[8px] tracking-wider block"
-          style={{ background: 'rgba(255,255,255,0.06)', color: '#06B6D4', border: 'none', textDecoration: 'none' }}
-        >
-          PIXEL
-        </a>
-        <a
-          href="/dev/gallery"
-          target="_blank"
-          className="px-2 py-1.5 rounded text-[8px] tracking-wider block"
-          style={{ background: 'rgba(255,255,255,0.06)', color: '#F59E0B', border: 'none', textDecoration: 'none' }}
-        >
-          GALLERY
-        </a>
-        <a
-          href="/dev/resize"
-          target="_blank"
-          className="px-2 py-1.5 rounded text-[8px] tracking-wider block"
-          style={{ background: 'rgba(255,255,255,0.06)', color: '#d070d0', border: 'none', textDecoration: 'none' }}
-        >
-          RESIZE
-        </a>
-        <a
-          href="/dev/zones"
-          target="_blank"
-          className="px-2 py-1.5 rounded text-[8px] tracking-wider block"
-          style={{ background: 'rgba(255,255,255,0.06)', color: '#e06080', border: 'none', textDecoration: 'none' }}
-        >
-          ZONES
-        </a>
-        <a
-          href="/dev/schedule"
-          target="_blank"
-          className="px-2 py-1.5 rounded text-[8px] tracking-wider block"
-          style={{ background: 'rgba(255,255,255,0.06)', color: '#a0e0a0', border: 'none', textDecoration: 'none' }}
-        >
-          SCHED
-        </a>
+        {[
+          { label: 'PIXEL', href: '/dev/editor', color: '#06B6D4' },
+          { label: 'GALLERY', href: '/dev/gallery', color: '#F59E0B' },
+          { label: 'RESIZE', href: '/dev/resize', color: '#d070d0' },
+          { label: 'ZONES', href: '/dev/zones', color: '#e06080' },
+          { label: 'SCHED', href: '/dev/schedule', color: '#a0e0a0' },
+        ].map(({ label, href, color }) => (
+          <button
+            key={label}
+            onClick={() => setDevModal(devModal === href ? null : href)}
+            className="px-2 py-1.5 rounded text-[8px] tracking-wider text-left"
+            style={{
+              fontFamily: menuFont,
+              background: devModal === href ? color : 'rgba(255,255,255,0.06)',
+              color: devModal === href ? '#1a0e08' : color,
+              border: 'none', cursor: 'pointer',
+            }}
+          >
+            {devModal === href ? '✓ ' : ''}{label}
+          </button>
+        ))}
       </div>
       {/* Scene canvas */}
       <div className="relative" style={{ width: W*SCALE, height: H*SCALE }}>
@@ -2125,6 +2108,39 @@ export default function IgnisScene() {
         <span style={{ color: EMOTION_COLORS[emotion] }}>● {emotion.toUpperCase()}</span>
         {role && <span style={{ color: ROLE_COLORS[role], opacity: 0.55 }}>▪ {role.toUpperCase()}</span>}
       </div>
+      {/* Dev tool modal — portaled to body to escape CSS transform */}
+      {devModal && typeof document !== 'undefined' && createPortal(
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
+          onKeyDown={(e) => { if (e.key === 'Escape') setDevModal(null); }}
+          tabIndex={-1}
+          ref={(el) => el?.focus()}
+        >
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)' }} onClick={() => setDevModal(null)} />
+          <div style={{ position: 'relative', zIndex: 2, width: '90vw', maxWidth: 1200, display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+            <button
+              onClick={() => setDevModal(null)}
+              style={{
+                fontFamily: menuFont, fontSize: 10, padding: '6px 14px',
+                borderRadius: 6, border: 'none', cursor: 'pointer',
+                background: '#e04040', color: '#fff',
+              }}
+            >
+              ✕ CLOSE
+            </button>
+          </div>
+          <iframe
+            src={devModal}
+            style={{
+              position: 'relative', zIndex: 1,
+              width: '95vw', height: '90vh', maxWidth: 1400,
+              borderRadius: 12, border: 'none',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+            }}
+          />
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

@@ -2,287 +2,244 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { registry } from '@web/lib/furniture';
-import type { FurnitureDef, PlacementZone } from '@web/lib/furniture/types';
+import type { FurnitureDef } from '@web/lib/furniture/types';
 import { drawSceneBackground } from '@web/lib/scene-backgrounds';
 
-const SCENE_BG_SRCS: Record<string, string> = {
-  room: '/room-bg.png',
-  garden: '/garden-bg.png',
-};
-const sceneBgImgs: Record<string, HTMLImageElement | null> = {};
+const W = 192, H = 160, SCALE = 4, TILE = 8;
+const DW = W * SCALE, DH = H * SCALE;
 
-const W = 192, H = 160, SCALE = 4;
-const DISPLAY_W = W * SCALE, DISPLAY_H = H * SCALE;
-const TILE = 8;
-
-const ZONE_STORAGE_KEY = 'ignis_zone_boundaries';
+const ZONE_KEY = 'ignis_zone_boundaries';
 
 interface ZoneBoundaries {
-  ceilingBottom: number; // pixel Y where ceiling ends (top of wall)
-  wallBottom: number;    // pixel Y where wall ends (top of floor)
+  ceilingBottom: number; // display pixels
+  wallBottom: number;    // display pixels
 }
 
-function loadZones(): ZoneBoundaries {
+type AllZones = Record<string, ZoneBoundaries>;
+
+const DEFAULTS: Record<string, ZoneBoundaries> = {
+  room: { ceilingBottom: 128, wallBottom: 256 },
+  garden: { ceilingBottom: 32, wallBottom: 64 },  // garden still has zones for structure
+  bedroom: { ceilingBottom: 128, wallBottom: 256 },
+};
+
+function loadAllZones(): AllZones {
   try {
-    const raw = localStorage.getItem(ZONE_STORAGE_KEY);
+    const raw = localStorage.getItem(ZONE_KEY);
     if (raw) return JSON.parse(raw);
   } catch {}
-  return { ceilingBottom: 32, wallBottom: 64 }; // defaults: 4 rows ceiling, 4 rows wall
+  return { ...DEFAULTS };
 }
 
-function saveZones(zones: ZoneBoundaries) {
-  localStorage.setItem(ZONE_STORAGE_KEY, JSON.stringify(zones));
+function loadZonesForScene(scene: string): ZoneBoundaries {
+  const all = loadAllZones();
+  return all[scene] || DEFAULTS[scene] || { ceilingBottom: 128, wallBottom: 256 };
 }
 
-const ZONE_COLORS: Record<PlacementZone, string> = {
-  ceiling: '#4488ff',
-  wall: '#44cc44',
-  floor: '#cc8844',
-};
+function saveZonesForScene(scene: string, z: ZoneBoundaries) {
+  const all = loadAllZones();
+  all[scene] = z;
+  localStorage.setItem(ZONE_KEY, JSON.stringify(all));
+}
 
-const ZONE_LABELS: Record<PlacementZone, string> = {
-  ceiling: 'C',
-  wall: 'W',
-  floor: 'F',
-};
+const BG_SRCS: Record<string, string> = { room: '/room-bg.png', garden: '/garden-bg.png' };
+const ZONE_COLORS = { ceiling: 'rgba(68,136,255,0.25)', wall: 'rgba(68,204,68,0.25)', floor: 'rgba(204,136,68,0.15)' };
+
+type PlacementZone = 'ceiling' | 'wall' | 'floor';
 
 export default function ZonesPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const bgCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [zones, setZones] = useState<ZoneBoundaries>(loadZones);
+  const [scene, setSceneState] = useState<'room' | 'garden' | 'bedroom'>('room');
+  const [zones, setZonesState] = useState<ZoneBoundaries>(() => loadZonesForScene('room'));
+  const zonesRef = useRef(zones);
+  const setZones = (z: ZoneBoundaries) => {
+    zonesRef.current = z;
+    setZonesState(z);
+  };
+  const setScene = (s: 'room' | 'garden' | 'bedroom') => {
+    setSceneState(s);
+    const loaded = loadZonesForScene(s);
+    zonesRef.current = loaded;
+    setZonesState(loaded);
+  };
   const [dragging, setDragging] = useState<'ceiling' | 'wall' | null>(null);
-  const [scene, setScene] = useState<'room' | 'garden' | 'bedroom'>('room');
+  const [bgImgs, setBgImgs] = useState<Record<string, HTMLImageElement>>({});
   const [allDefs, setAllDefs] = useState<FurnitureDef[]>([]);
+  const [, setTick] = useState(0);
 
-  // Load furniture defs
   useEffect(() => {
     setAllDefs(registry.getAllDefs());
+    Object.entries(BG_SRCS).forEach(([k, src]) => {
+      const img = new Image(); img.src = src;
+      img.onload = () => setBgImgs(p => ({ ...p, [k]: img }));
+    });
   }, []);
 
-  // Filter defs for current scene
   const sceneDefs = allDefs.filter(d => (d.scene ?? 'room') === scene);
+  const bg = bgImgs[scene];
 
   // Draw
   useEffect(() => {
-    const canvas = canvasRef.current;
-    const bgCanvas = bgCanvasRef.current;
-    if (!canvas || !bgCanvas) return;
-    const ctx = canvas.getContext('2d')!;
-    const bgCtx = bgCanvas.getContext('2d')!;
+    const c = canvasRef.current;
+    if (!c) return;
+    const ctx = c.getContext('2d')!;
+    ctx.clearRect(0, 0, DW, DH);
 
-    // Draw background at display res — use hi-res image if available
-    bgCtx.clearRect(0, 0, DISPLAY_W, DISPLAY_H);
-    const src = SCENE_BG_SRCS[scene];
-    if (src && !sceneBgImgs[scene]) {
-      const img = new Image();
-      img.src = src;
-      img.onload = () => { sceneBgImgs[scene] = img; setAllDefs([...registry.getAllDefs()]); }; // trigger re-render
-    }
-    if (src && sceneBgImgs[scene]) {
-      bgCtx.imageSmoothingEnabled = true;
-      bgCtx.imageSmoothingQuality = 'high';
-      bgCtx.drawImage(sceneBgImgs[scene]!, 0, 0, DISPLAY_W, DISPLAY_H);
+    // Background — hi-res image or procedural fallback
+    if (bg) {
+      ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(bg, 0, 0, DW, DH);
+      ctx.fillStyle = 'rgba(0,0,0,0.1)'; ctx.fillRect(0, 0, DW, DH);
     } else {
-      // Fallback to procedural
-      const offscreen = document.createElement('canvas');
-      offscreen.width = W;
-      offscreen.height = H;
-      const offCtx = offscreen.getContext('2d')!;
-      drawSceneBackground(offCtx, scene);
-      bgCtx.imageSmoothingEnabled = false;
-      bgCtx.drawImage(offscreen, 0, 0, DISPLAY_W, DISPLAY_H);
+      // Procedural fallback (bedroom, or while images load)
+      ctx.save(); ctx.scale(SCALE, SCALE);
+      drawSceneBackground(ctx, scene);
+      ctx.restore();
     }
 
-    // Draw zone overlays
-    ctx.clearRect(0, 0, DISPLAY_W, DISPLAY_H);
+    // Zone overlays
+    ctx.fillStyle = ZONE_COLORS.ceiling;
+    ctx.fillRect(0, 0, DW, zones.ceilingBottom);
 
-    // Ceiling zone
-    ctx.fillStyle = 'rgba(68, 136, 255, 0.2)';
-    ctx.fillRect(0, 0, DISPLAY_W, zones.ceilingBottom * SCALE);
-    // Ceiling label
+    ctx.fillStyle = ZONE_COLORS.wall;
+    ctx.fillRect(0, zones.ceilingBottom, DW, zones.wallBottom - zones.ceilingBottom);
+
+    ctx.fillStyle = ZONE_COLORS.floor;
+    ctx.fillRect(0, zones.wallBottom, DW, DH - zones.wallBottom);
+
+    // Zone labels
+    ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center';
     ctx.fillStyle = '#4488ff';
-    ctx.font = 'bold 14px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('CEILING', DISPLAY_W / 2, zones.ceilingBottom * SCALE / 2 + 6);
-
-    // Wall zone
-    ctx.fillStyle = 'rgba(68, 204, 68, 0.2)';
-    ctx.fillRect(0, zones.ceilingBottom * SCALE, DISPLAY_W, (zones.wallBottom - zones.ceilingBottom) * SCALE);
-    // Wall label
+    ctx.fillText('CEILING', DW / 2, zones.ceilingBottom / 2 + 6);
     ctx.fillStyle = '#44cc44';
-    ctx.fillText('WALL', DISPLAY_W / 2, (zones.ceilingBottom + (zones.wallBottom - zones.ceilingBottom) / 2) * SCALE + 6);
-
-    // Floor zone
-    ctx.fillStyle = 'rgba(204, 136, 68, 0.15)';
-    ctx.fillRect(0, zones.wallBottom * SCALE, DISPLAY_W, (H - zones.wallBottom) * SCALE);
-    // Floor label
+    ctx.fillText('WALL', DW / 2, zones.ceilingBottom + (zones.wallBottom - zones.ceilingBottom) / 2 + 6);
     ctx.fillStyle = '#cc8844';
-    ctx.fillText('FLOOR', DISPLAY_W / 2, (zones.wallBottom + (H - zones.wallBottom) / 2) * SCALE + 6);
+    ctx.fillText('FLOOR', DW / 2, zones.wallBottom + (DH - zones.wallBottom) / 2 + 6);
 
-    // Drag handles — thick lines at zone boundaries
-    // Ceiling bottom edge
+    // Drag lines
+    ctx.setLineDash([8, 4]); ctx.lineWidth = 3;
     ctx.strokeStyle = '#4488ff';
-    ctx.lineWidth = 3;
-    ctx.setLineDash([8, 4]);
-    ctx.beginPath();
-    ctx.moveTo(0, zones.ceilingBottom * SCALE);
-    ctx.lineTo(DISPLAY_W, zones.ceilingBottom * SCALE);
-    ctx.stroke();
-
-    // Wall bottom edge
+    ctx.beginPath(); ctx.moveTo(0, zones.ceilingBottom); ctx.lineTo(DW, zones.ceilingBottom); ctx.stroke();
     ctx.strokeStyle = '#44cc44';
-    ctx.beginPath();
-    ctx.moveTo(0, zones.wallBottom * SCALE);
-    ctx.lineTo(DISPLAY_W, zones.wallBottom * SCALE);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, zones.wallBottom); ctx.lineTo(DW, zones.wallBottom); ctx.stroke();
     ctx.setLineDash([]);
 
-    // Grid row markers on the right side
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.font = '10px monospace';
-    ctx.textAlign = 'right';
-    for (let row = 0; row <= H / TILE; row++) {
-      const y = row * TILE * SCALE;
-      ctx.fillStyle = 'rgba(255,255,255,0.15)';
-      ctx.fillRect(0, y, DISPLAY_W, 1);
-      ctx.fillStyle = 'rgba(255,255,255,0.4)';
-      ctx.fillText(`r${row}`, DISPLAY_W - 4, y + 12);
-    }
-  }, [zones, scene]);
+    // Drag handle indicators
+    ctx.fillStyle = '#4488ff';
+    ctx.fillRect(DW / 2 - 20, zones.ceilingBottom - 4, 40, 8);
+    ctx.fillStyle = '#fff'; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('↕', DW / 2, zones.ceilingBottom + 3);
 
-  // Mouse handlers for dragging zone boundaries
-  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    ctx.fillStyle = '#44cc44';
+    ctx.fillRect(DW / 2 - 20, zones.wallBottom - 4, 40, 8);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('↕', DW / 2, zones.wallBottom + 3);
+
+    // Info
+    ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0, 0, DW, 24);
+    ctx.fillStyle = '#e0e0e0'; ctx.font = '11px monospace'; ctx.textAlign = 'left';
+    const cr = Math.round(zones.ceilingBottom / SCALE / TILE);
+    const wr = Math.round(zones.wallBottom / SCALE / TILE);
+    ctx.fillText(`Ceiling: rows 0-${cr - 1}  |  Wall: rows ${cr}-${wr - 1}  |  Floor: rows ${wr}-${H / TILE - 1}`, 8, 16);
+  }, [zones, scene, bg]);
+
+  const handleDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const py = (e.clientY - rect.top) / SCALE;
-    const ceilDist = Math.abs(py - zones.ceilingBottom);
-    const wallDist = Math.abs(py - zones.wallBottom);
-    if (ceilDist < 4) setDragging('ceiling');
-    else if (wallDist < 4) setDragging('wall');
-  }, [zones]);
+    const my = e.clientY - rect.top;
+    const cur = zonesRef.current;
+    if (Math.abs(my - cur.ceilingBottom) < 12) setDragging('ceiling');
+    else if (Math.abs(my - cur.wallBottom) < 12) setDragging('wall');
+  }, []);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!dragging) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const py = Math.round((e.clientY - rect.top) / SCALE / TILE) * TILE; // snap to grid rows
+    const my = e.clientY - rect.top;
+    const cur = zonesRef.current;
     if (dragging === 'ceiling') {
-      const clamped = Math.max(TILE, Math.min(zones.wallBottom - TILE, py));
-      setZones(z => ({ ...z, ceilingBottom: clamped }));
-    } else if (dragging === 'wall') {
-      const clamped = Math.max(zones.ceilingBottom + TILE, Math.min(H - TILE, py));
-      setZones(z => ({ ...z, wallBottom: clamped }));
+      const clamped = Math.max(16, Math.min(cur.wallBottom - 16, my));
+      setZones({ ...cur, ceilingBottom: clamped });
+    } else {
+      const clamped = Math.max(cur.ceilingBottom + 16, Math.min(DH - 16, my));
+      setZones({ ...cur, wallBottom: clamped });
     }
-  }, [dragging, zones]);
+    saveZonesForScene(scene, zonesRef.current);
+  }, [dragging]);
 
-  const handleMouseUp = useCallback(() => {
+  const handleUp = useCallback(() => {
     if (dragging) {
-      saveZones(zones);
+      saveZonesForScene(scene, zonesRef.current);
       setDragging(null);
     }
-  }, [dragging, zones]);
+  }, [dragging]);
 
-  // Zone assignment for a furniture piece
   const getZone = (def: FurnitureDef): PlacementZone => def.zone ?? 'floor';
-
-  // Cycle zone on click
-  const cycleZone = (def: FurnitureDef) => {
-    const current = getZone(def);
-    const next: PlacementZone = current === 'floor' ? 'wall' : current === 'wall' ? 'ceiling' : 'floor';
-    def.zone = next;
-    setAllDefs([...registry.getAllDefs()]); // force re-render
-  };
+  const zoneColor = (z: PlacementZone) => z === 'ceiling' ? '#4488ff' : z === 'wall' ? '#44cc44' : '#cc8844';
+  const zoneLabel = (z: PlacementZone) => z === 'ceiling' ? 'C' : z === 'wall' ? 'W' : 'F';
 
   return (
-    <div style={{ background: '#0a0a0e', minHeight: '100vh', color: '#e0e0e0', padding: 24 }}>
-      <div style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 14, marginBottom: 16, color: '#F59E0B' }}>
+    <div style={{ background: '#0a0a0e', minHeight: '100vh', color: '#e0e0e0', padding: 20 }}>
+      <div style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 14, marginBottom: 6, color: '#F59E0B' }}>
         Zone Editor
       </div>
-      <div style={{ fontSize: 12, marginBottom: 16, color: '#888' }}>
-        Drag the dashed lines to set zone boundaries. Click furniture to cycle its zone (F → W → C).
+      <div style={{ fontSize: 11, color: '#888', marginBottom: 12 }}>
+        Drag the <span style={{ color: '#4488ff' }}>blue</span> and <span style={{ color: '#44cc44' }}>green</span> lines to set zone boundaries. Click furniture to cycle zones.
       </div>
 
-      {/* Scene selector */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
         {(['room', 'garden', 'bedroom'] as const).map(s => (
-          <button
-            key={s}
-            onClick={() => setScene(s)}
-            style={{
-              fontFamily: "'Press Start 2P', monospace",
-              fontSize: 8, padding: '6px 12px', borderRadius: 4, border: 'none', cursor: 'pointer',
-              background: scene === s ? '#F59E0B' : 'rgba(255,255,255,0.08)',
-              color: scene === s ? '#1a0e08' : '#a0a0a0',
-            }}
-          >
-            {s.toUpperCase()}
-          </button>
+          <button key={s} onClick={() => setScene(s)} style={{
+            fontFamily: "'Press Start 2P', monospace", fontSize: 8, padding: '6px 12px',
+            borderRadius: 4, border: 'none', cursor: 'pointer',
+            background: scene === s ? '#F59E0B' : 'rgba(255,255,255,0.08)',
+            color: scene === s ? '#1a0e08' : '#a0a0a0',
+          }}>{s.toUpperCase()}</button>
         ))}
+        <button onClick={() => {
+          const def = DEFAULTS[scene] || { ceilingBottom: 128, wallBottom: 256 };
+          setZones(def);
+          saveZonesForScene(scene, def);
+        }} style={{
+          fontFamily: "'Press Start 2P', monospace", fontSize: 7, padding: '5px 10px',
+          borderRadius: 4, border: 'none', cursor: 'pointer',
+          background: 'rgba(220,60,60,0.15)', color: '#e06060',
+        }}>RESET ZONES</button>
       </div>
 
-      <div style={{ display: 'flex', gap: 24 }}>
-        {/* Canvas with zone overlay */}
-        <div style={{ position: 'relative', width: DISPLAY_W, height: DISPLAY_H, flexShrink: 0 }}>
-          <canvas
-            ref={bgCanvasRef}
-            width={DISPLAY_W}
-            height={DISPLAY_H}
-            style={{ position: 'absolute', imageRendering: 'pixelated' }}
-          />
-          <canvas
-            ref={canvasRef}
-            width={DISPLAY_W}
-            height={DISPLAY_H}
-            style={{
-              position: 'absolute',
-              cursor: dragging ? 'row-resize' : 'default',
-            }}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-          />
-        </div>
+      <div style={{ display: 'flex', gap: 16 }}>
+        <canvas ref={canvasRef} width={DW} height={DH}
+          style={{ borderRadius: 8, cursor: dragging ? 'row-resize' : 'default', flexShrink: 0 }}
+          onMouseDown={handleDown} onMouseMove={handleMove}
+          onMouseUp={handleUp} onMouseLeave={handleUp}
+        />
 
-        {/* Furniture list with zone badges */}
-        <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 10, marginBottom: 12, color: '#888' }}>
+        <div style={{ flex: 1, maxHeight: DH, overflowY: 'auto' }}>
+          <div style={{ fontFamily: "'Press Start 2P', monospace", fontSize: 8, color: '#888', marginBottom: 8 }}>
             FURNITURE — {scene.toUpperCase()}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             {sceneDefs.map(def => {
               const zone = getZone(def);
               return (
-                <div
-                  key={def.id}
-                  onClick={() => cycleZone(def)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-                    background: 'rgba(255,255,255,0.04)', borderRadius: 4, cursor: 'pointer',
-                    border: `1px solid ${ZONE_COLORS[zone]}33`,
-                  }}
-                >
+                <div key={def.id} onClick={() => {
+                  const next: PlacementZone = zone === 'floor' ? 'wall' : zone === 'wall' ? 'ceiling' : 'floor';
+                  def.zone = next;
+                  setAllDefs([...registry.getAllDefs()]);
+                }} style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px',
+                  background: 'rgba(255,255,255,0.04)', borderRadius: 4, cursor: 'pointer',
+                  border: `1px solid ${zoneColor(zone)}33`,
+                }}>
                   <div style={{
-                    width: 22, height: 22, borderRadius: 4,
-                    background: ZONE_COLORS[zone],
-                    color: '#000', fontWeight: 'bold', fontSize: 12,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontFamily: 'monospace',
-                  }}>
-                    {ZONE_LABELS[zone]}
-                  </div>
+                    width: 20, height: 20, borderRadius: 4, background: zoneColor(zone),
+                    color: '#000', fontWeight: 'bold', fontSize: 11,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'monospace',
+                  }}>{zoneLabel(zone)}</div>
                   <div style={{ fontSize: 11, flex: 1 }}>{def.label}</div>
-                  <div style={{ fontSize: 9, color: '#666' }}>
-                    {def.gridW}×{def.gridH}
-                  </div>
+                  <div style={{ fontSize: 9, color: '#666' }}>{def.gridW}×{def.gridH}</div>
                 </div>
               );
             })}
-          </div>
-
-          {/* Zone info */}
-          <div style={{ marginTop: 20, fontSize: 10, color: '#666', lineHeight: 1.8 }}>
-            <div>Ceiling: rows 0–{Math.floor(zones.ceilingBottom / TILE) - 1} (y 0–{zones.ceilingBottom - 1}px)</div>
-            <div>Wall: rows {Math.floor(zones.ceilingBottom / TILE)}–{Math.floor(zones.wallBottom / TILE) - 1} (y {zones.ceilingBottom}–{zones.wallBottom - 1}px)</div>
-            <div>Floor: rows {Math.floor(zones.wallBottom / TILE)}–{H / TILE - 1} (y {zones.wallBottom}–{H - 1}px)</div>
           </div>
         </div>
       </div>

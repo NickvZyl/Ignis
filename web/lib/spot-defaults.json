@@ -8,8 +8,8 @@
     "spotDy": 2
   },
   "couch": {
-    "spotDx": 4,
-    "spotDy": 0
+    "spotDx": 3.986376404700689,
+    "spotDy": 2.81774130887133
   },
   "fireplace": {
     "spotDx": 1,
@@ -20,8 +20,8 @@
     "spotDy": 1
   },
   "kitchen": {
-    "spotDx": 2,
-    "spotDy": 1
+    "spotDx": 3.64768532550179,
+    "spotDy": 2.571333412420154
   },
   "fridge": {
     "spotDx": -1,

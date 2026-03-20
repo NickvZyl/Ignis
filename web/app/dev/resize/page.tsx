@@ -226,30 +226,28 @@ export default function ResizePage() {
       setGrids(updated); save(assets, updated); redraw(); return;
     }
 
-    // Sprite dragging — free resize (independent W/H)
-    let newW = o.widthPx, newH = o.heightPx, newOX = o.offsetX, newOY = o.offsetY;
+    // Sprite dragging — aspect-ratio locked
+    const spriteAspect = img.naturalHeight / img.naturalWidth;
+    let newW = o.widthPx, newOX = o.offsetX, newOY = o.offsetY;
 
     if (drag === 'move') {
       newOX = o.offsetX + dx;
       newOY = o.offsetY + dy;
     } else if (drag === 'br') {
       newW = Math.max(24, o.widthPx + dx);
-      newH = Math.max(24, o.heightPx + dy);
     } else if (drag === 'bl') {
       newW = Math.max(24, o.widthPx - dx);
-      newH = Math.max(24, o.heightPx + dy);
       newOX = o.offsetX + (o.widthPx - newW);
     } else if (drag === 'tr') {
       newW = Math.max(24, o.widthPx + dx);
-      newH = Math.max(24, o.heightPx - dy);
-      newOY = o.offsetY + (o.heightPx - newH);
+      newOY = o.offsetY + (o.heightPx - newW * spriteAspect);
     } else if (drag === 'tl') {
       newW = Math.max(24, o.widthPx - dx);
-      newH = Math.max(24, o.heightPx - dy);
       newOX = o.offsetX + (o.widthPx - newW);
-      newOY = o.offsetY + (o.heightPx - newH);
+      newOY = o.offsetY + (o.heightPx - newW * spriteAspect);
     }
 
+    const newH = drag === 'move' ? o.heightPx : newW * spriteAspect;
     const updated = { ...assets, [def.id]: { widthPx: newW, heightPx: newH, offsetX: newOX, offsetY: newOY } };
     setAssets(updated);
     save(updated, grids);
