@@ -217,10 +217,16 @@ export function buildSystemPrompt(
     parts.push(`Your recent thoughts: ${lines.join('. ')}`);
   }
 
-  // ── Capabilities (from self-knowledge DB or fallback) ──
+  // ── Self-knowledge (capabilities + emotional understanding) ──
   if (selfKnowledge.length > 0) {
-    const caps = selfKnowledge.map(sk => sk.content).join(' ');
-    parts.push(`Your capabilities: ${caps}`);
+    const caps = selfKnowledge.filter(sk => sk.category === 'capability');
+    const emo = selfKnowledge.filter(sk => sk.category === 'emotional');
+    if (caps.length > 0) {
+      parts.push(`Your capabilities:\n${caps.map(sk => `- ${sk.key}: ${sk.content}`).join('\n')}`);
+    }
+    if (emo.length > 0) {
+      parts.push(`Your emotional self-understanding:\n${emo.map(sk => `- ${sk.content}`).join('\n')}`);
+    }
   } else {
     parts.push(`Capabilities: kanban board (add/move/update/remove tasks), web search, schedule (view/modify via tools), memory across conversations. Tags: [GOTO:furniture_id] to move, [FOLLOWUP:seconds:what] to auto follow-up. Ask where they live early if unknown.`);
   }

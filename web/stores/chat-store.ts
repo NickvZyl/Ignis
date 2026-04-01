@@ -1463,12 +1463,15 @@ async function retrieveSelfMemories(userId: string): Promise<SelfMemory[]> {
 
 async function loadSelfKnowledge(userId: string): Promise<Array<{ category: string; key: string; content: string; source: string }>> {
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('self_knowledge')
       .select('category, key, content, source')
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .in('category', ['capability', 'emotional']);
+    if (error) console.error('[SelfKnowledge] load failed:', error.message);
     return data || [];
-  } catch {
+  } catch (e) {
+    console.error('[SelfKnowledge] exception:', e);
     return [];
   }
 }
