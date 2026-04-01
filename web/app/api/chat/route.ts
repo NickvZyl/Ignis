@@ -7,11 +7,26 @@ const MODEL = 'anthropic/claude-sonnet-4-6';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseServiceRole = createClient(supabaseUrl, supabaseAnonKey);
 
 function getSupabaseForUser(accessToken: string) {
   return createClient(supabaseUrl, supabaseAnonKey, {
     global: { headers: { Authorization: `Bearer ${accessToken}` } },
   });
+}
+
+async function logError(source: string, message: string, statusCode?: number, rawResponse?: string, userId?: string) {
+  try {
+    await supabaseServiceRole.from('error_log').insert({
+      source,
+      message,
+      status_code: statusCode,
+      raw_response: rawResponse?.slice(0, 2000),
+      user_id: userId,
+    });
+  } catch (e) {
+    console.error('[ErrorLog] failed to log:', e);
+  }
 }
 
 const HEADERS = {
@@ -586,12 +601,8 @@ export async function POST(req: NextRequest) {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('[Chat API] round', round, 'failed:', response.status, errorText);
-      let userMessage = 'Something went wrong talking to the AI.';
-      if (response.status === 401) userMessage = 'AI service authentication failed — the API key may be invalid or expired.';
-      else if (response.status === 402) userMessage = 'AI service credits exhausted — please top up your OpenRouter account.';
-      else if (response.status === 429) userMessage = 'Too many requests — please wait a moment and try again.';
-      else if (response.status >= 500) userMessage = 'AI service is temporarily down — try again in a minute.';
-      return Response.json({ error: userMessage }, { status: response.status });
+      await logError('chat.openrouter', `${response.status}: ${errorText.slice(0, 500)}`, response.status, errorText, userId);
+      return Response.json({ error: "Hmm, I can't think right now. Try again in a moment!" }, { status: 502 });
     }
 
     const data = await response.json();
@@ -623,8 +634,9 @@ export async function POST(req: NextRequest) {
           model: MODEL, messages: followUpMessages, temperature: 0.85, max_tokens: 1024, stream: stream,
         });
         if (!finalResponse.ok) {
-          const error = await finalResponse.text();
-          return new Response(error, { status: finalResponse.status });
+          const errorText = await finalResponse.text();
+          await logError('chat.followup', `${finalResponse.status}: ${errorText.slice(0, 500)}`, finalResponse.status, errorText, userId);
+          return Response.json({ error: "Hmm, I can't think right now. Try again in a moment!" }, { status: 502 });
         }
         if (stream) {
           return new Response(finalResponse.body, {
