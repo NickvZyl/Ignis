@@ -1,9 +1,0 @@
-node_modules
-web/node_modules
-web/.next
-web/out
-web/android
-.git
-.env
-.env*.local
-*.md
