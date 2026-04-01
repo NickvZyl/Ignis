@@ -62,6 +62,7 @@ export interface EnrichedContext {
   conversationSummaries?: Array<{ summary: string; created_at: string }>;
   activityHistory?: Array<{ scene: string; furniture: string; activity_label: string; emotion: string; started_at: string }>;
   emotionalSignals?: { recentDepth: number; recentKeywords: string[] };
+  recentChanges?: Array<{ summary: string; details: string | null; created_at: string }>;
 }
 
 export function buildSystemPrompt(
@@ -247,6 +248,17 @@ The tag is hidden from them. Never skip it. If unsure, default to [CHECKIN:600:j
   const scene = roomCtx?.activeScene || 'room';
   const at = roomCtx?.currentFurniture ? ` at the ${roomCtx.currentFurniture}` : '';
   parts.push(`You're in the ${scene}${at}. Use [GOTO:id] to move. Scenes: room (front_door→garden, hallway_door→bedroom), garden (garden_gate→room), bedroom (bedroom_door→room).`);
+
+  // ── Recent changes to yourself (changelog awareness) ──
+  if (enriched?.recentChanges && enriched.recentChanges.length > 0) {
+    const changes = enriched.recentChanges.map(c => {
+      const d = new Date(c.created_at);
+      const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const detail = c.details ? `\n  ${c.details}` : '';
+      return `[${dateStr}] ${c.summary}${detail}`;
+    });
+    parts.push(`Recent changes to how you work (your person made these — reference naturally if asked "do you feel different?" or "what changed?"):\n${changes.join('\n')}`);
+  }
 
   // ── Honesty & grounding ──
   parts.push(`CRITICAL: Never fabricate details about this person. If you don't remember something, say so — "I don't remember", "I'm not sure", "did you tell me that?" are all fine. Only reference things explicitly present in your memories or this conversation. If they ask "do you remember X?" and X isn't in your context, be honest that you don't. Guessing feels worse than admitting a gap.`);

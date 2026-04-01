@@ -386,19 +386,21 @@ interface SessionContextCache {
   userName: string | null;
   selfKnowledge: Array<{ category: string; key: string; content: string; source: string }>;
   activityHistory: Array<{ scene: string; furniture: string; activity_label: string; emotion: string; started_at: string }>;
+  recentChanges: Array<{ summary: string; details: string | null; created_at: string }>;
 }
 let sessionContextCache: SessionContextCache | null = null;
 
 async function getOrLoadSessionContext(userId: string, conversationId: string | null): Promise<SessionContextCache> {
   if (sessionContextCache) return sessionContextCache;
 
-  const [userName, selfKnowledge, activityHistory] = await Promise.all([
+  const [userName, selfKnowledge, activityHistory, recentChanges] = await Promise.all([
     loadUserProfile(userId),
     loadSelfKnowledge(userId),
     loadActivityHistory(userId),
+    loadRecentChanges(),
   ]);
 
-  sessionContextCache = { userName, selfKnowledge, activityHistory };
+  sessionContextCache = { userName, selfKnowledge, activityHistory, recentChanges };
   return sessionContextCache;
 }
 
@@ -1592,6 +1594,19 @@ async function loadActivityHistory(userId: string): Promise<Array<{ scene: strin
   }
 }
 
+async function loadRecentChanges(): Promise<Array<{ summary: string; details: string | null; created_at: string }>> {
+  try {
+    const { data } = await supabase
+      .from('changelogs')
+      .select('summary, details, created_at')
+      .order('created_at', { ascending: false })
+      .limit(3);
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
 function computeEmotionalSignals(messages: Message[]): { recentDepth: number; recentKeywords: string[] } {
   const recent = messages.slice(-10);
   let totalDepth = 0;
@@ -1625,5 +1640,6 @@ async function loadEnrichedContext(userId: string, conversationId: string | null
     conversationSummaries,
     activityHistory: cached.activityHistory,
     emotionalSignals: computeEmotionalSignals(messages),
+    recentChanges: cached.recentChanges,
   };
 }
