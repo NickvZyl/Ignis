@@ -8,6 +8,7 @@ export const def: FurnitureDef = {
   required: true,
   perimeterOnly: true,
   scene: 'garden',
+  hiResSprites: { 0: '/furniture/garden_gate-front-clean.png' },
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number, ts: number) {

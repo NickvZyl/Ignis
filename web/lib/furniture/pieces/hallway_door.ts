@@ -3,10 +3,11 @@ import type { FurnitureDef } from '../types';
 
 export const def: FurnitureDef = {
   id: 'hallway_door', label: 'Hallway Door', gridW: 2, gridH: 3,
-  spotDx: 1, spotDy: 3, canOverlapWall: true, drawKey: 'hallway_door',
+  spotDx: 0, spotDy: 2, canOverlapWall: true, drawKey: 'hallway_door',
   category: 'structural', tags: [],
   required: true,
   perimeterOnly: true,
+  hiResSprites: { 0: '/furniture/hallway_door-front-clean.png' },
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number, ts: number) {

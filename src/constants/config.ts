@@ -11,6 +11,10 @@ export const CONFIG = {
     attachmentGrowth: 0.002,    // base attachment growth per message
     valenceDecayRate: 0.1,      // rate valence approaches neutral
     arousalDecayTarget: 0.2,    // arousal decays toward this
+    intraSessionDriftRate: 0.015,    // drift per environment tick when silent > threshold
+    intraSessionDriftThresholdH: 2,  // hours of silence before intra-session drift kicks in
+    attachmentDecayStartH: 24,       // hours before attachment begins decaying
+    attachmentDecayMaxRate: 0.3,     // max fraction of attachment lost (~7 days)
     memoryTopK: 5,              // memories to inject into prompt
     minConversationForMemory: 3, // min messages before extracting memories
   },

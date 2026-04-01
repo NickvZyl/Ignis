@@ -6,6 +6,7 @@ export const def: FurnitureDef = {
   spotDx: 2, spotDy: 4, canOverlapWall: false, drawKey: 'cow_pen',
   category: 'nature', tags: ['animals'],
   scene: 'garden',
+  hiResSprites: { 0: '/furniture/cow_pen-front-clean.png' },
 };
 
 function drawCow(ctx: CanvasRenderingContext2D, cx: number, cy: number, ts: number, seed: number) {

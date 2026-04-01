@@ -3,9 +3,15 @@ import { darker } from '../colors';
 import type { FurnitureDef } from '../types';
 
 export const def: FurnitureDef = {
-  id: 'bookshelf', label: 'Bookshelf', gridW: 4, gridH: 2,
-  spotDx: 2, spotDy: 2, canOverlapWall: false, drawKey: 'bookshelf',
+  id: 'bookshelf', label: 'Bookshelf', gridW: 2, gridH: 2,
+  spotDx: 0.4718955139639558, spotDy: 2.062392741700908, canOverlapWall: true, drawKey: 'bookshelf',
   category: 'storage', tags: ['reading'],
+  hiResSprites: {
+    0: '/furniture/bookshelf-front-clean.png',
+    1: '/furniture/bookshelf-right-clean.png',
+    2: '/furniture/bookshelf-back-clean.png',
+    3: '/furniture/bookshelf-left-clean.png',
+  },
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number) {

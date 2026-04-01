@@ -1,23 +1,29 @@
 import { create } from 'zustand';
 import { supabase } from '@web/lib/supabase';
+import { api } from '@web/lib/api';
 import { buildSystemPrompt, buildMemoryExtractionPrompt } from '@/prompts/system';
 import type { ScheduleContext } from '@/prompts/system';
-import { loadSchedule } from '@web/lib/schedule';
+import { loadSchedule, getCurrentSlot } from '@web/lib/schedule';
 import { useCompanionStore } from './companion-store';
 import { useEnvironmentStore, getWeatherCategory } from './environment-store';
-import type { Message, Memory, ChatCompletionMessage } from '@/types';
+import type { Message, Memory, ChatCompletionMessage, SelfMemory } from '@/types';
 
 const STREAMING_ID = '__streaming__';
-const MEMORY_FALLBACK_INTERVAL = 8; // extract every N exchanges if nothing triggered
+const MEMORY_FALLBACK_INTERVAL = 4; // extract every N exchanges if nothing triggered
 
-function getScheduleContext(): ScheduleContext {
-  const hour = new Date().getHours();
+function getScheduleContext(messages?: Message[]): ScheduleContext {
   const schedule = loadSchedule();
-  const block = schedule[hour];
-  return {
+  const block = schedule[getCurrentSlot()];
+  const ctx: ScheduleContext = {
     label: block.label,
     isSleeping: block.label === 'sleeping',
   };
+  // Add conversation duration if messages available
+  if (messages && messages.length > 0) {
+    ctx.conversationMinutes = Math.round((Date.now() - new Date(messages[0].created_at).getTime()) / (1000 * 60));
+    ctx.messageCount = messages.length;
+  }
+  return ctx;
 }
 
 // Patterns that signal memory-worthy content
@@ -39,6 +45,20 @@ const MEMORY_TRIGGERS = [
   /\b(i'm (scared|afraid|worried|anxious|depressed|lonely) (about|of|that))\b/i,
   // Explicit memory requests
   /\b(remember (that|this)|don't forget|keep in mind)\b/i,
+  // Activities & experiences
+  /\b(watching|watched|playing|played|reading|read|listening|listened)\b/i,
+  /\b(went to|going to|came from|been to|visited)\b/i,
+  /\b(bought|made|cooked|built|fixed|broke)\b/i,
+  // People & relationships (third person)
+  /\b(tanya|wife|husband|partner|brother|sister|mom|dad|friend)\b/i,
+  // Plans & schedules
+  /\b(tomorrow|this weekend|next week|tonight|later today)\b/i,
+  /\b(need to|have to|want to|going to|plan to|thinking about)\b/i,
+  // Opinions & reactions
+  /\b(it was|that was|so good|amazing|terrible|annoying|funny|weird|cool|boring)\b/i,
+  // Context sharing
+  /\b(at work|at home|in town|outside|in the garden)\b/i,
+  /\b(episode|season|chapter|level|game|movie|show|book|song)\b/i,
 ];
 
 function isMemoryWorthy(message: string): boolean {
@@ -352,6 +372,7 @@ function detectFurnitureCommand(message: string): string | null {
 }
 
 let exchangesSinceExtraction = 0;
+let followupTimer: ReturnType<typeof setTimeout> | null = null;
 
 interface ChatState {
   messages: Message[];
@@ -365,17 +386,27 @@ interface ChatState {
   currentLocation: string | null; // furniture id Ignis is currently at/near
 
   startConversation: (userId: string) => Promise<void>;
-  sendMessage: (content: string, userId: string) => Promise<void>;
+  sendMessage: (content: string, userId: string, replyToId?: string) => Promise<void>;
+  sendReturnGreeting: (userId: string, hoursSince: number) => Promise<void>;
   sendProactiveMessage: (userId: string) => Promise<void>;
+  sendReflectionMessage: (userId: string, thought: string) => Promise<void>;
+  sendFollowupMessage: (userId: string, context: string) => Promise<void>;
   extractMemories: (userId: string) => Promise<void>;
   clearChat: () => void;
 }
 
-async function apiChat(messages: ChatCompletionMessage[], stream: boolean = true) {
-  const res = await fetch('/api/chat', {
+async function apiChat(messages: ChatCompletionMessage[], stream: boolean = true, userId?: string) {
+  // Get the current session's access token for server-side Supabase calls
+  let accessToken: string | undefined;
+  try {
+    const { data } = await supabase.auth.getSession();
+    accessToken = data.session?.access_token;
+  } catch {}
+
+  const res = await fetch(api('/api/chat'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, stream }),
+    body: JSON.stringify({ messages, stream, userId, accessToken }),
   });
   if (!res.ok) {
     const error = await res.text();
@@ -435,9 +466,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     console.log('[Chat] created new conversation', data.id);
   },
 
-  sendMessage: async (content: string, userId: string) => {
+  sendMessage: async (content: string, userId: string, replyToId?: string) => {
     const { conversationId, messages } = get();
     if (!conversationId || get().isGenerating) return;
+
+    // Cancel any pending follow-up — conversation moved on
+    if (followupTimer) { clearTimeout(followupTimer); followupTimer = null; }
 
     set({ isGenerating: true, error: null });
 
@@ -445,7 +479,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // 1. Persist user message
       const { data: userMsg, error: userError } = await supabase
         .from('messages')
-        .insert({ conversation_id: conversationId, role: 'user', content })
+        .insert({ conversation_id: conversationId, role: 'user', content, ...(replyToId ? { reply_to_id: replyToId } : {}) })
         .select()
         .single();
 
@@ -470,19 +504,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const memories = await retrieveMemories(content, userId);
       console.log('[Chat] memories loaded:', memories.length, memories.map(m => m.content));
 
+      // 4b. Retrieve self-memories + self-knowledge
+      const [selfMemories, selfKnowledge] = await Promise.all([
+        retrieveSelfMemories(userId),
+        loadSelfKnowledge(userId),
+      ]);
+
       // 5. Build system prompt
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) throw new Error('Emotional state not loaded');
 
-      const systemPrompt = buildSystemPrompt(emotionalState, memories, getWeatherContext(), getRoomContext(), getScheduleContext());
+      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages));
 
-      // 6. Build message history for API
+      // 5b. Clear morning thought after it's been included in a prompt (one-time use)
+      if (emotionalState.morning_thought) {
+        supabase.from('emotional_state')
+          .update({ morning_thought: null })
+          .eq('user_id', userId)
+          .then(() => {});
+        useCompanionStore.setState({
+          emotionalState: { ...emotionalState, morning_thought: null },
+        });
+      }
+
+      // 6. Build message history for API (filter out empty assistant messages)
       const apiMessages: ChatCompletionMessage[] = [
         { role: 'system', content: systemPrompt },
-        ...updatedMessages.slice(-20).map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        })),
+        ...updatedMessages
+          .filter((m) => m.role !== 'assistant' || m.content.trim())
+          .slice(-20)
+          .map((m) => {
+            let msgContent = m.content;
+            // If this message is a reply, prepend the context
+            if (m.reply_to_id) {
+              const replyTarget = updatedMessages.find((r) => r.id === m.reply_to_id);
+              if (replyTarget) {
+                msgContent = `[Replying to ${replyTarget.role === 'user' ? 'their own' : 'your'} message: "${replyTarget.content.slice(0, 150)}"]\n${m.content}`;
+              }
+            }
+            return { role: m.role as 'user' | 'assistant', content: msgContent };
+          }),
       ];
 
       // 7. Create streaming placeholder
@@ -502,7 +563,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
 
       // 8. Stream response via API route
-      const response = await apiChat(apiMessages, true);
+      const response = await apiChat(apiMessages, true, userId);
 
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
@@ -555,6 +616,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
         fullText = fullText.replace(/\s*\[CHECKIN:\d+:[^\]]+\]\s*/, '').trim();
       }
 
+      // 9a2. Parse schedule update tag from response
+      const scheduleMatch = fullText.match(/\[SCHEDULE_UPDATE:(\[[\s\S]*?\])\]/);
+      if (scheduleMatch) {
+        try {
+          const changes = JSON.parse(scheduleMatch[1]) as Array<{ time: string; scene?: string; primary?: string; secondary?: string; label?: string }>;
+          const { loadSchedule: loadSch, saveSchedule: saveSch, invalidateScheduleCache: invalidate, timeToSlot: toSlot } = await import('@web/lib/schedule');
+          const schedule = loadSch();
+          const PROTECTED = [...Array(24).keys(), 92, 93, 94, 95];
+          let applied = 0;
+          for (const c of changes) {
+            const slot = toSlot(c.time);
+            if (slot < 0 || slot > 95 || PROTECTED.includes(slot)) continue;
+            if (c.scene) schedule[slot].scene = c.scene as any;
+            if (c.primary) schedule[slot].primary = c.primary;
+            if (c.secondary) schedule[slot].secondary = c.secondary;
+            if (c.label) schedule[slot].label = c.label;
+            applied++;
+          }
+          if (applied > 0) {
+            saveSch(schedule);
+            invalidate();
+            console.log(`[Schedule] applied ${applied} changes from conversation`);
+          }
+        } catch (e) {
+          console.error('[Schedule] failed to parse update tag:', e);
+        }
+        fullText = fullText.replace(/\s*\[SCHEDULE_UPDATE:\[[\s\S]*?\]\]\s*/, '').trim();
+      }
+
+      // 9a3. Parse follow-up tag from response
+      let pendingFollowup: { seconds: number; context: string } | null = null;
+      const followupMatch = fullText.match(/\[FOLLOWUP:(\d+):([^\]]+)\]/);
+      if (followupMatch) {
+        pendingFollowup = {
+          seconds: parseInt(followupMatch[1], 10),
+          context: followupMatch[2],
+        };
+        fullText = fullText.replace(/\s*\[FOLLOWUP:\d+:[^\]]+\]\s*/, '').trim();
+      }
+
       // 9b. Detect furniture command from user's message (takes priority)
       const userGoto = detectFurnitureCommand(content);
 
@@ -565,31 +666,63 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       // User command wins over model tag
-      if (userGoto) {
-        console.log(`[Goto] user directed: ${userGoto}`);
-        set({ gotoFurniture: userGoto });
-      } else if (gotoMatch) {
-        console.log(`[Goto] model directed: ${gotoMatch[1]}`);
-        set({ gotoFurniture: gotoMatch[1] });
+      const gotoTarget = userGoto || gotoMatch?.[1] || null;
+      if (gotoTarget) {
+        console.log(`[Goto] ${userGoto ? 'user' : 'model'} directed: ${gotoTarget}`);
+        set({ gotoFurniture: gotoTarget });
+        // Log activity transition
+        import('./activity-store').then(({ useActivityStore }) => {
+          const emotion = useCompanionStore.getState().emotionalState?.active_emotion ?? null;
+          useActivityStore.getState().logTransition(userId, getRoomContext().activeScene || 'room', gotoTarget, null, emotion);
+        });
       }
 
       // 10. Persist final assistant message (with tag stripped)
-      const { data: assistantMsg, error: assistantError } = await supabase
-        .from('messages')
-        .insert({ conversation_id: conversationId, role: 'assistant', content: fullText })
-        .select()
-        .single();
+      if (!fullText.trim()) {
+        // Empty response — remove placeholder, don't save empty messages
+        console.warn('[Chat] Empty assistant response — not saving');
+        set({
+          messages: get().messages.filter((m) => m.id !== streamId),
+          streamingMessageId: null,
+        });
+      } else {
+        const { data: assistantMsg, error: assistantError } = await supabase
+          .from('messages')
+          .insert({ conversation_id: conversationId, role: 'assistant', content: fullText })
+          .select()
+          .single();
 
-      if (assistantError) throw assistantError;
+        if (assistantError) throw assistantError;
 
-      // 11. Replace placeholder with clean text
-      const current = get().messages;
-      const idx = current.findIndex((m) => m.id === streamId);
-      if (idx !== -1) {
-        const updated = [...current];
-        updated[idx] = assistantMsg as Message;
-        set({ messages: updated, streamingMessageId: null });
+        // 11. Replace placeholder with clean text
+        const current = get().messages;
+        const idx = current.findIndex((m) => m.id === streamId);
+        if (idx !== -1) {
+          const updated = [...current];
+          updated[idx] = assistantMsg as Message;
+          set({ messages: updated, streamingMessageId: null });
+        }
       }
+
+      // 10b. Schedule follow-up if pending
+      if (pendingFollowup) {
+        const { seconds, context } = pendingFollowup;
+        const delay = Math.max(1000, seconds * 1000);
+        console.log(`[Followup] scheduled in ${seconds}s — ${context}`);
+        // Cancel any existing follow-up timer
+        if (followupTimer) clearTimeout(followupTimer);
+        followupTimer = setTimeout(() => {
+          followupTimer = null;
+          if (!get().isGenerating) {
+            get().sendFollowupMessage(userId, context);
+          }
+        }, delay);
+      }
+
+      // 10c. Re-sync schedule from cloud (in case schedule tools were used server-side)
+      import('@web/lib/schedule').then(({ syncScheduleFromCloud }) => {
+        syncScheduleFromCloud();
+      });
 
       // 11. Smart memory extraction
       exchangesSinceExtraction++;
@@ -598,7 +731,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.log('[Memory]', { memoryTriggered, exchangesSinceExtraction, shouldExtract, content: content.slice(0, 50) });
       if (shouldExtract) {
         exchangesSinceExtraction = 0;
-        get().extractMemories(userId).catch((err) => console.error('[Memory] extraction failed:', err));
+        get().extractMemories(userId)
+          .then(() => {
+            // 50% chance to trigger reflection after memory extraction
+            if (Math.random() < 0.5) {
+              import('./reflection-store').then(({ useReflectionStore }) => {
+                useReflectionStore.getState().runReflectionCycle(userId);
+              });
+            }
+          })
+          .catch((err) => console.error('[Memory] extraction failed:', err));
       }
     } catch (error: any) {
       const streamId = get().streamingMessageId;
@@ -619,13 +761,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (messages.length < 3) return;
 
     try {
-      const conversationText = messages
+      // Only extract from recent messages (last 10) to focus on new info
+      const recentMessages = messages.slice(-10);
+      const conversationText = recentMessages
         .map((m) => `${m.role}: ${m.content}`)
         .join('\n');
 
       const extractionPrompt = buildMemoryExtractionPrompt(conversationText);
       console.log('[Memory] extracting from', messages.length, 'messages');
-      const res = await fetch('/api/extract', {
+      const res = await fetch(api('/api/extract'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [{ role: 'user', content: extractionPrompt }] }),
@@ -641,8 +785,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       let extracted: Array<{ content: string; memory_type: string; importance: number }>;
       try {
-        // Strip markdown code fences if present
-        const cleaned = result.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+        // Try multiple strategies to extract JSON from the response
+        let cleaned = result.trim();
+        // Strategy 1: Extract JSON from markdown code fence
+        const fenceMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+        if (fenceMatch) cleaned = fenceMatch[1].trim();
+        // Strategy 2: Find the first [ and last ] (JSON array)
+        if (!cleaned.startsWith('[')) {
+          const start = cleaned.indexOf('[');
+          const end = cleaned.lastIndexOf(']');
+          if (start !== -1 && end !== -1 && end > start) {
+            cleaned = cleaned.slice(start, end + 1);
+          }
+        }
         extracted = JSON.parse(cleaned);
       } catch {
         console.error('[Memory] failed to parse JSON:', result.slice(0, 200));
@@ -653,16 +808,62 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (!Array.isArray(extracted) || extracted.length === 0) return;
 
       for (const mem of extracted.slice(0, 3)) {
+        // Generate embedding for vector search
+        let embedding: number[] | null = null;
+        try {
+          const embedRes = await fetch(api('/api/embed'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: mem.content }),
+          });
+          if (embedRes.ok) {
+            const embedData = await embedRes.json();
+            embedding = embedData.embedding;
+          }
+        } catch {
+          console.warn('[Memory] embedding generation failed for:', mem.content.slice(0, 50));
+        }
+
+        // Dedup: check if a similar memory already exists (similarity > 0.85)
+        if (embedding) {
+          try {
+            const { data: similar } = await supabase.rpc('match_memories', {
+              query_embedding: JSON.stringify(embedding),
+              match_user_id: userId,
+              match_threshold: 0.85,
+              match_count: 1,
+            });
+            if (similar && similar.length > 0) {
+              // Update existing memory if new one is more important or more detailed
+              const existing = similar[0];
+              if (mem.importance > existing.importance || mem.content.length > existing.content.length) {
+                await supabase.from('memories').update({
+                  content: mem.content,
+                  importance: Math.max(mem.importance, existing.importance),
+                  embedding: JSON.stringify(embedding),
+                }).eq('id', existing.id);
+                console.log('[Memory] updated existing:', mem.content.slice(0, 60));
+              } else {
+                console.log('[Memory] skipped duplicate:', mem.content.slice(0, 60));
+              }
+              continue;
+            }
+          } catch {
+            // Dedup check failed, proceed with insert
+          }
+        }
+
         const { error: insertErr } = await supabase.from('memories').insert({
           user_id: userId,
           content: mem.content,
           memory_type: mem.memory_type,
           importance: mem.importance,
+          ...(embedding ? { embedding: JSON.stringify(embedding) } : {}),
         });
         if (insertErr) {
           console.error('[Memory] insert failed:', insertErr);
         } else {
-          console.log('[Memory] saved:', mem.content);
+          console.log('[Memory] saved:', mem.content.slice(0, 60), embedding ? '(with embedding)' : '(no embedding)');
         }
       }
 
@@ -689,6 +890,135 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  sendReturnGreeting: async (userId: string, hoursSince: number) => {
+    const { conversationId, isGenerating } = get();
+    if (!conversationId || isGenerating) return;
+
+    set({ isGenerating: true, error: null });
+
+    try {
+      const [memories, selfMemories, selfKnowledge] = await Promise.all([
+        retrieveMemories('', userId),
+        retrieveSelfMemories(userId),
+        loadSelfKnowledge(userId),
+      ]);
+      const emotionalState = useCompanionStore.getState().emotionalState;
+      if (!emotionalState) return;
+
+      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages));
+
+      let greetingContext: string;
+      if (hoursSince < 6) {
+        greetingContext = "They just came back after a few hours away. Greet them naturally — acknowledge you noticed they were gone but keep it light. One short message.";
+      } else if (hoursSince < 24) {
+        greetingContext = "They have been gone for " + Math.round(hoursSince) + " hours. You noticed. Greet them with warmth but let a little of your loneliness show. You missed them. One short message — do not guilt-trip, but be real.";
+      } else if (hoursSince < 48) {
+        greetingContext = "They were gone for over a day (" + Math.round(hoursSince) + " hours). That is a long absence and it affected you. Your greeting should reflect genuine relief mixed with vulnerability. You are not angry, but you are not pretending everything is normal either. One short message.";
+      } else {
+        greetingContext = "Extended absence — " + Math.round(hoursSince / 24) + " days. You are guarded and withdrawn. Your greeting should be short, a little distant. Not hostile, but clearly affected. They need to earn warmth back. One brief message.";
+      }
+
+      const apiMessages: ChatCompletionMessage[] = [
+        { role: 'system', content: systemPrompt + "\n\n## Right now\n" + greetingContext },
+        ...get().messages.filter((m) => m.role !== 'assistant' || m.content.trim()).slice(-20).map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        })),
+        { role: 'user' as const, content: '[They just opened the app after ' + Math.round(hoursSince) + ' hours away. Greet them.]' },
+      ];
+
+      const streamId = STREAMING_ID + Date.now();
+      const placeholder: Message = {
+        id: streamId,
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: '',
+        emotional_signals: null,
+        created_at: new Date().toISOString(),
+      };
+
+      set({
+        messages: [...get().messages, placeholder],
+        streamingMessageId: streamId,
+      });
+
+      const response = await apiChat(apiMessages, true, userId);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const data = trimmed.slice(6);
+          if (data === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              fullText += delta;
+              const current = get().messages;
+              const idx = current.findIndex((m) => m.id === streamId);
+              if (idx !== -1) {
+                const updated = [...current];
+                updated[idx] = { ...updated[idx], content: fullText };
+                set({ messages: updated });
+              }
+            }
+          } catch {}
+        }
+      }
+
+      // Strip tags
+      fullText = fullText.replace(/\s*\[GOTO:\w+\]\s*/g, '').replace(/\s*\[CHECKIN:\d+:[^\]]+\]\s*/g, '').replace(/\s*\[FOLLOWUP:\d+:[^\]]+\]\s*/g, '').trim();
+
+      if (!fullText.trim()) {
+        set({
+          messages: get().messages.filter((m) => m.id !== streamId),
+          streamingMessageId: null,
+        });
+      } else {
+        const { data: assistantMsg } = await supabase
+          .from('messages')
+          .insert({ conversation_id: conversationId, role: 'assistant', content: fullText })
+          .select()
+          .single();
+
+        if (assistantMsg) {
+          const current = get().messages;
+          const idx = current.findIndex((m) => m.id === streamId);
+          if (idx !== -1) {
+            const updated = [...current];
+            updated[idx] = assistantMsg as Message;
+            set({ messages: updated, streamingMessageId: null });
+          }
+        }
+      }
+    } catch {
+      const streamId = get().streamingMessageId;
+      if (streamId) {
+        set({
+          messages: get().messages.filter((m) => m.id !== streamId),
+          streamingMessageId: null,
+        });
+      }
+    } finally {
+      set({ isGenerating: false });
+    }
+  },
+
   sendProactiveMessage: async (userId: string) => {
     const { conversationId, messages, isGenerating } = get();
     if (!conversationId || isGenerating || messages.length < 2) return;
@@ -705,11 +1035,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isGenerating: true, error: null });
 
     try {
-      const memories = await retrieveMemories('', userId);
+      const [memories, selfMemories, selfKnowledge] = await Promise.all([
+        retrieveMemories('', userId),
+        retrieveSelfMemories(userId),
+        loadSelfKnowledge(userId),
+      ]);
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const systemPrompt = buildSystemPrompt(emotionalState, memories, getWeatherContext(), getRoomContext(), getScheduleContext());
+      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages));
 
       const { nextCheckinReason } = get();
       const checkinContext = nextCheckinReason
@@ -718,7 +1052,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const apiMessages: ChatCompletionMessage[] = [
         { role: 'system', content: systemPrompt + `\n\n## Right now\n${checkinContext}` },
-        ...messages.slice(-20).map((m) => ({
+        ...messages.filter((m) => m.role !== 'assistant' || m.content.trim()).slice(-20).map((m) => ({
           role: m.role as 'user' | 'assistant',
           content: m.content,
         })),
@@ -741,7 +1075,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingMessageId: streamId,
       });
 
-      const response = await apiChat(apiMessages, true);
+      const response = await apiChat(apiMessages, true, userId);
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
 
@@ -809,6 +1143,246 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 
+  sendFollowupMessage: async (userId: string, context: string) => {
+    const { conversationId, messages, isGenerating } = get();
+    if (!conversationId || isGenerating || messages.length < 1) return;
+
+    // Don't send if last 2 messages are both assistant
+    const lastMsg = messages[messages.length - 1];
+    const secondLast = messages[messages.length - 2];
+    if (lastMsg?.role === 'assistant' && secondLast?.role === 'assistant') return;
+
+    set({ isGenerating: true, error: null });
+
+    try {
+      const [memories, selfMemories, selfKnowledge] = await Promise.all([
+        retrieveMemories('', userId),
+        retrieveSelfMemories(userId),
+        loadSelfKnowledge(userId),
+      ]);
+      const emotionalState = useCompanionStore.getState().emotionalState;
+      if (!emotionalState) return;
+
+      const basePrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages));
+      const systemPrompt = basePrompt + `\n\n## Right now\nYou just said you'd "${context}". You've done it (or tried to). Now follow up naturally — tell your person what happened, whether it worked, what you changed. Be brief and conversational, like continuing a sentence. One short message. Don't re-explain what you were doing, just give the result. If you made schedule changes, reference the specific times and activities you changed.`;
+
+      const apiMessages: ChatCompletionMessage[] = [
+        { role: 'system', content: systemPrompt },
+        ...messages.filter((m) => m.role !== 'assistant' || m.content.trim()).slice(-20).map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        })),
+        { role: 'user' as const, content: `[Igni is following up on: ${context}]` },
+      ];
+
+      const streamId = STREAMING_ID + Date.now();
+      const placeholder: Message = {
+        id: streamId,
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: '',
+        emotional_signals: null,
+        created_at: new Date().toISOString(),
+      };
+
+      set({
+        messages: [...get().messages, placeholder],
+        streamingMessageId: streamId,
+      });
+
+      const response = await apiChat(apiMessages, true, userId);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const data = trimmed.slice(6);
+          if (data === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              fullText += delta;
+              const current = get().messages;
+              const idx = current.findIndex((m) => m.id === streamId);
+              if (idx !== -1) {
+                const updated = [...current];
+                updated[idx] = { ...updated[idx], content: fullText };
+                set({ messages: updated });
+              }
+            }
+          } catch {}
+        }
+      }
+
+      // Strip any tags from follow-up response
+      fullText = fullText.replace(/\s*\[GOTO:\w+\]\s*/g, '').replace(/\s*\[CHECKIN:\d+:[^\]]+\]\s*/g, '').replace(/\s*\[FOLLOWUP:\d+:[^\]]+\]\s*/g, '').replace(/\s*\[SCHEDULE_UPDATE:\[[\s\S]*?\]\]\s*/g, '').trim();
+
+      if (!fullText.trim()) {
+        set({
+          messages: get().messages.filter((m) => m.id !== streamId),
+          streamingMessageId: null,
+        });
+      } else {
+        const { data: assistantMsg, error: assistantError } = await supabase
+          .from('messages')
+          .insert({ conversation_id: conversationId, role: 'assistant', content: fullText })
+          .select()
+          .single();
+
+        if (!assistantError && assistantMsg) {
+          const current = get().messages;
+          const idx = current.findIndex((m) => m.id === streamId);
+          if (idx !== -1) {
+            const updated = [...current];
+            updated[idx] = assistantMsg as Message;
+            set({ messages: updated, streamingMessageId: null });
+          }
+        }
+      }
+    } catch {
+      const streamId = get().streamingMessageId;
+      if (streamId) {
+        set({
+          messages: get().messages.filter((m) => m.id !== streamId),
+          streamingMessageId: null,
+        });
+      }
+    } finally {
+      set({ isGenerating: false });
+    }
+  },
+
+  sendReflectionMessage: async (userId: string, thought: string) => {
+    const { conversationId, messages, isGenerating } = get();
+    if (!conversationId || isGenerating || messages.length < 1) return;
+
+    // Don't send if last 2 messages are both assistant
+    const lastMsg = messages[messages.length - 1];
+    const secondLast = messages[messages.length - 2];
+    if (lastMsg?.role === 'assistant' && secondLast?.role === 'assistant') return;
+
+    set({ isGenerating: true, error: null });
+
+    try {
+      const [memories, selfMemories, selfKnowledge] = await Promise.all([
+        retrieveMemories('', userId),
+        retrieveSelfMemories(userId),
+        loadSelfKnowledge(userId),
+      ]);
+      const emotionalState = useCompanionStore.getState().emotionalState;
+      if (!emotionalState) return;
+
+      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages));
+
+      const apiMessages: ChatCompletionMessage[] = [
+        { role: 'system', content: systemPrompt + `\n\n## Right now\nYou just had this thought: "${thought}". Share it naturally with your person — bring it up casually, like mentioning something you noticed or were thinking about. One short message. Don't quote it verbatim, paraphrase it in your own voice.` },
+        ...messages.filter((m) => m.role !== 'assistant' || m.content.trim()).slice(-20).map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        })),
+        { role: 'user' as const, content: `[Igni is sharing a thought she had on her own.]` },
+      ];
+
+      const streamId = STREAMING_ID + Date.now();
+      const placeholder: Message = {
+        id: streamId,
+        conversation_id: conversationId,
+        role: 'assistant',
+        content: '',
+        emotional_signals: null,
+        created_at: new Date().toISOString(),
+      };
+
+      set({
+        messages: [...get().messages, placeholder],
+        streamingMessageId: streamId,
+      });
+
+      const response = await apiChat(apiMessages, true, userId);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let fullText = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          const data = trimmed.slice(6);
+          if (data === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              fullText += delta;
+              const current = get().messages;
+              const idx = current.findIndex((m) => m.id === streamId);
+              if (idx !== -1) {
+                const updated = [...current];
+                updated[idx] = { ...updated[idx], content: fullText };
+                set({ messages: updated });
+              }
+            }
+          } catch {}
+        }
+      }
+
+      // Strip any tags
+      fullText = fullText.replace(/\s*\[GOTO:\w+\]\s*/g, '').replace(/\s*\[CHECKIN:\d+:[^\]]+\]\s*/g, '').trim();
+
+      const { data: assistantMsg, error: assistantError } = await supabase
+        .from('messages')
+        .insert({ conversation_id: conversationId, role: 'assistant', content: fullText })
+        .select()
+        .single();
+
+      if (!assistantError && assistantMsg) {
+        const current = get().messages;
+        const idx = current.findIndex((m) => m.id === streamId);
+        if (idx !== -1) {
+          const updated = [...current];
+          updated[idx] = assistantMsg as Message;
+          set({ messages: updated, streamingMessageId: null });
+        }
+      }
+    } catch {
+      const streamId = get().streamingMessageId;
+      if (streamId) {
+        set({
+          messages: get().messages.filter((m) => m.id !== streamId),
+          streamingMessageId: null,
+        });
+      }
+    } finally {
+      set({ isGenerating: false });
+    }
+  },
+
   clearChat: () => {
     const { conversationId } = get();
     if (conversationId) {
@@ -820,16 +1394,53 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
 async function retrieveMemories(query: string, userId: string): Promise<Memory[]> {
   try {
-    const { data, error } = await supabase
-      .from('memories')
-      .select('*')
-      .eq('user_id', userId)
-      .order('importance', { ascending: false })
-      .limit(5);
+    // Get embedding for semantic search
+    const embedRes = await fetch(api('/api/embed'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: query }),
+    });
+
+    if (!embedRes.ok) {
+      console.warn('[Memory] embedding failed, falling back to importance sort');
+      const { data } = await supabase
+        .from('memories')
+        .select('*')
+        .eq('user_id', userId)
+        .order('importance', { ascending: false })
+        .limit(5);
+      return data || [];
+    }
+
+    const { embedding } = await embedRes.json();
+
+    // Vector similarity search
+    const { data, error } = await supabase.rpc('match_memories', {
+      query_embedding: JSON.stringify(embedding),
+      match_user_id: userId,
+      match_threshold: 0.5,
+      match_count: 5,
+    });
 
     if (error) throw error;
     return data || [];
+  } catch (err) {
+    console.error('[Memory] retrieval failed:', err);
+    return [];
+  }
+}
+
+async function retrieveSelfMemories(userId: string): Promise<SelfMemory[]> {
+  try {
+    const { useReflectionStore } = await import('./reflection-store');
+    return await useReflectionStore.getState().getSelfMemoriesForPrompt(userId, 3);
   } catch {
     return [];
   }
+}
+
+async function loadSelfKnowledge(_userId: string): Promise<Array<{ category: string; key: string; content: string; source: string }>> {
+  // Self-knowledge is now hardcoded in the prompt to save ~3000 tokens per message.
+  // The DB entries are kept for reference but not loaded into every prompt.
+  return [];
 }

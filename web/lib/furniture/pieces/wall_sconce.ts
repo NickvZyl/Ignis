@@ -1,10 +1,26 @@
 import { registry } from '../registry';
 import type { FurnitureDef } from '../types';
 
+function animateWallSconce(
+  ctx: CanvasRenderingContext2D, dx: number, dy: number, dw: number, dh: number, ts: number,
+) {
+  // Candle flame flicker
+  const flicker = Math.sin(ts * 0.01) * 0.15 + Math.sin(ts * 0.007 + 2) * 0.1 + 0.5;
+  const cx = dx + dw * 0.48, cy = dy + dh * 0.28, r = dw * 0.1;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 3);
+  g.addColorStop(0, `rgba(255,200,80,${flicker * 0.6})`);
+  g.addColorStop(0.3, `rgba(255,150,40,${flicker * 0.3})`);
+  g.addColorStop(1, 'rgba(255,100,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(cx - r * 3, cy - r * 3, r * 6, r * 6);
+}
+
 export const def: FurnitureDef = {
-  id: 'wall_sconce', label: 'Wall Sconce', gridW: 1, gridH: 2,
-  spotDx: 0, spotDy: 4, canOverlapWall: true, zone: 'wall', drawKey: 'wall_sconce',
+  id: 'wall_sconce', label: 'Wall Sconce', gridW: 1, gridH: 1,
+  spotDx: 0, spotDy: 2, canOverlapWall: true, zone: 'wall', drawKey: 'wall_sconce',
   category: 'lighting', tags: [],
+  hiResSprites: { 0: '/furniture/wall_sconce-front-clean.png' },
+  hiResAnimate: animateWallSconce,
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number, ts: number) {

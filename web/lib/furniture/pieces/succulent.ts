@@ -5,6 +5,7 @@ export const def: FurnitureDef = {
   id: 'succulent', label: 'Succulent', gridW: 1, gridH: 1,
   spotDx: 1, spotDy: 0, canOverlapWall: false, drawKey: 'succulent',
   category: 'nature', tags: [],
+  hiResSprites: { 0: '/furniture/succulent-front-clean.png' },
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number) {

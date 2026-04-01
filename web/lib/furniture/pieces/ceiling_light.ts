@@ -1,10 +1,26 @@
 import { registry } from '../registry';
 import type { FurnitureDef } from '../types';
 
+function animateCeilingLight(
+  ctx: CanvasRenderingContext2D, dx: number, dy: number, dw: number, dh: number, ts: number,
+) {
+  // Warm glow from the lantern
+  const pulse = Math.sin(ts * 0.0018) * 0.08 + 0.3;
+  const cx = dx + dw * 0.45, cy = dy + dh * 0.65, r = dw * 0.18;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2.5);
+  g.addColorStop(0, `rgba(255,225,160,${pulse})`);
+  g.addColorStop(0.4, `rgba(255,200,120,${pulse * 0.4})`);
+  g.addColorStop(1, 'rgba(255,180,100,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(cx - r * 2.5, cy - r * 2.5, r * 5, r * 5);
+}
+
 export const def: FurnitureDef = {
   id: 'ceiling_light', label: 'Ceiling Light', gridW: 2, gridH: 1,
   spotDx: 1, spotDy: 8, canOverlapWall: true, zone: 'ceiling', drawKey: 'ceiling_light',
   category: 'lighting', tags: [],
+  hiResSprites: { 0: '/furniture/ceiling_light-front-clean.png' },
+  hiResAnimate: animateCeilingLight,
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number, ts: number) {

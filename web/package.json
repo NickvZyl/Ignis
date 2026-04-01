@@ -5,9 +5,20 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "build:mobile": "node scripts/build-mobile.js",
+    "cap:sync": "npx cap sync",
+    "cap:open": "npx cap open android",
+    "build:android": "npm run build:mobile && npm run cap:sync && npm run cap:open"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.0",
+    "@capacitor/cli": "^8.3.0",
+    "@capacitor/core": "^8.3.0",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/local-notifications": "^8.0.2",
+    "@capacitor/splash-screen": "^8.0.1",
+    "@capacitor/status-bar": "^8.0.2",
     "@supabase/supabase-js": "^2.49.4",
     "next": "^15.3.3",
     "react": "^19.1.0",
@@ -20,6 +31,7 @@
     "@types/node": "^22.15.21",
     "@types/react": "^19.1.4",
     "@types/react-dom": "^19.1.5",
+    "env-cmd": "^11.0.0",
     "tailwindcss": "^4.1.8",
     "typescript": "^5.8.3"
   }

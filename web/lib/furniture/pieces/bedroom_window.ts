@@ -6,6 +6,7 @@ export const def: FurnitureDef = {
   spotDx: 2, spotDy: 4, canOverlapWall: true, zone: 'wall', drawKey: 'bedroom_window',
   category: 'structural', tags: [],
   scene: 'bedroom',
+  hiResSprites: { 0: '/furniture/bedroom_window-front-clean.png' },
 };
 
 // The actual sky rendering is done in IgnisScene via drawBedroomWindow()

@@ -6,6 +6,7 @@ export const def: FurnitureDef = {
   spotDx: 2, spotDy: 3, canOverlapWall: false, drawKey: 'farm_patch',
   category: 'nature', tags: ['gardening'],
   scene: 'garden',
+  hiResSprites: { 0: '/furniture/farm_patch-front-clean.png' },
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number, ts: number) {

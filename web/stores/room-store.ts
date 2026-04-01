@@ -2,8 +2,8 @@ import { create } from 'zustand';
 import {
   type RoomLayout,
   type CellType,
-  type SpotData,
   type FurnitureRotation,
+  type FurnitureConfig,
   DEFAULT_LAYOUT,
   GARDEN_DEFAULT_LAYOUT,
   BEDROOM_DEFAULT_LAYOUT,
@@ -14,13 +14,58 @@ import {
   buildGrid,
   isValidPlacement,
   getSpotPixel,
-  applySpots,
-  getActiveSpots,
-  loadGridSizes,
-  setGridSize,
+  applyFurnitureConfig,
+  getFurnitureConfig,
+  updateFurnitureConfig,
 } from '@web/lib/room-grid';
 import { registry } from '@web/lib/furniture';
+import { supabase } from '@web/lib/supabase';
+import { api } from '@web/lib/api';
 import type { SceneId } from '@web/lib/room-grid';
+
+// ── Supabase sync helpers ──
+let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function syncToSupabase(scene: SceneId, layout: RoomLayout, inventory: string[]) {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+
+  const { error } = await supabase
+    .from('room_layouts')
+    .upsert({
+      user_id: user.id,
+      scene,
+      layout: layout as unknown as Record<string, unknown>,
+      inventory,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'user_id,scene' });
+
+  if (error) console.error('[RoomSync] Save failed:', error.message);
+  else console.log('[RoomSync] Saved', scene);
+}
+
+function debouncedSync(scene: SceneId, layout: RoomLayout, inventory: string[]) {
+  if (syncDebounceTimer) clearTimeout(syncDebounceTimer);
+  syncDebounceTimer = setTimeout(() => syncToSupabase(scene, layout, inventory), 2000);
+}
+
+async function loadFromSupabase(scene: SceneId): Promise<{ layout: RoomLayout; inventory: string[] } | null> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await supabase
+    .from('room_layouts')
+    .select('layout, inventory')
+    .eq('user_id', user.id)
+    .eq('scene', scene)
+    .single();
+
+  if (error || !data) return null;
+  return {
+    layout: data.layout as unknown as RoomLayout,
+    inventory: data.inventory as unknown as string[],
+  };
+}
 
 function storageKeys(scene: SceneId) {
   const map: Record<SceneId, { layout: string; inventory: string }> = {
@@ -98,6 +143,7 @@ function loadLayout(scene: SceneId = 'room'): RoomLayout {
 function saveLayout(layout: RoomLayout, scene: SceneId = 'room') {
   const keys = storageKeys(scene);
   localStorage.setItem(keys.layout, JSON.stringify(layout));
+  // Cloud sync is triggered separately via debouncedSync with both layout + inventory
 }
 
 function loadInventory(placedIds: string[], scene: SceneId = 'room'): string[] {
@@ -127,26 +173,21 @@ function saveInventory(inventory: string[], scene: SceneId = 'room') {
   localStorage.setItem(keys.inventory, JSON.stringify(inventory));
 }
 
-type SpotEdits = Record<string, { spotDx: number; spotDy: number }>;
-
 interface RoomState {
   currentScene: SceneId;
   layout: RoomLayout;
   grid: CellType[][];
   inventory: string[];
-  mode: 'live' | 'edit' | 'spot-edit';
+  mode: 'live' | 'edit';
   dragging: string | null;
   draggingRot: FurnitureRotation;
-  draggingSpot: string | null;
-  resizing: string | null;
-  resizeType: 'hitbox' | 'sprite' | null;
   placing: string | null;
   placingRot: FurnitureRotation;
-  pendingSpots: SpotEdits;
-  spotsLoaded: boolean;
+  configLoaded: boolean;
 
-  initSpots: () => Promise<void>;
-  setMode: (mode: 'live' | 'edit' | 'spot-edit') => void;
+  initConfig: () => Promise<void>;
+  reloadConfig: () => Promise<void>;
+  setMode: (mode: 'live' | 'edit') => void;
   switchSceneLayout: (scene: SceneId) => void;
   moveFurniture: (id: string, gx: number, gy: number, rot?: FurnitureRotation) => boolean;
   addToRoom: (id: string, gx: number, gy: number, rot?: FurnitureRotation) => boolean;
@@ -157,13 +198,9 @@ interface RoomState {
   startDrag: (id: string) => void;
   endDrag: () => void;
   cycleDraggingRot: () => void;
-  startSpotDrag: (id: string) => void;
-  endSpotDrag: () => void;
-  setSpotEdit: (id: string, spotDx: number, spotDy: number) => void;
-  saveSpots: () => Promise<void>;
-  resizeGrid: (id: string, gridW: number, gridH: number) => void;
   resetLayout: () => void;
   getSpot: (furnitureId: string) => { x: number; y: number } | null;
+  syncFromCloud: () => Promise<void>;
 }
 
 function getInitialScene(): SceneId {
@@ -186,28 +223,85 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   mode: 'live',
   dragging: null,
   draggingRot: 0,
-  draggingSpot: null,
-  resizing: null,
-  resizeType: null,
   placing: null,
   placingRot: 0,
-  pendingSpots: {},
-  spotsLoaded: false,
+  configLoaded: false,
 
-  initSpots: async () => {
-    if (get().spotsLoaded) return;
-    // Load grid size overrides from localStorage
-    loadGridSizes();
+  initConfig: async () => {
+    if (get().configLoaded) return;
     try {
-      const res = await fetch('/api/spots');
+      const res = await fetch(api('/api/furniture-config'));
       if (res.ok) {
-        const spots: SpotData = await res.json();
-        applySpots(spots);
+        const config: FurnitureConfig = await res.json();
+
+        // Migrate localStorage overrides into config if present
+        let needsSave = false;
+        try {
+          const legacyGridSizes = localStorage.getItem('ignis_grid_sizes');
+          if (legacyGridSizes) {
+            const parsed = JSON.parse(legacyGridSizes);
+            for (const [id, size] of Object.entries(parsed)) {
+              const s = size as { gridW: number; gridH: number };
+              if (!config[id]) config[id] = {};
+              if (config[id].gridW === undefined) config[id].gridW = s.gridW;
+              if (config[id].gridH === undefined) config[id].gridH = s.gridH;
+            }
+            localStorage.removeItem('ignis_grid_sizes');
+            needsSave = true;
+          }
+
+          const legacyAssetSizes = localStorage.getItem('ignis_asset_sizes');
+          if (legacyAssetSizes) {
+            const parsed = JSON.parse(legacyAssetSizes);
+            for (const [key, size] of Object.entries(parsed)) {
+              const s = size as { widthPx: number; heightPx: number; offsetX: number; offsetY: number };
+              // Parse keys like "desk_r0", "couch_r1"
+              const match = key.match(/^(.+)_r(\d+)$/);
+              if (!match) continue;
+              const [, id, rotStr] = match;
+              const rot = parseInt(rotStr);
+              if (!config[id]) config[id] = {};
+              if (rot === 0) {
+                if (!config[id].sprite) config[id].sprite = s;
+              } else {
+                if (!config[id].spriteOverrides) config[id].spriteOverrides = {};
+                if (!config[id].spriteOverrides![String(rot)]) config[id].spriteOverrides![String(rot)] = s;
+              }
+            }
+            localStorage.removeItem('ignis_asset_sizes');
+            needsSave = true;
+          }
+        } catch {}
+
+        if (needsSave) {
+          fetch(api('/api/furniture-config'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config),
+          }).catch(() => {});
+        }
+
+        applyFurnitureConfig(config);
         const { layout, currentScene } = get();
-        set({ grid: buildGrid(layout, wallRowsFor(currentScene)), spotsLoaded: true });
+        set({ grid: buildGrid(layout, wallRowsFor(currentScene)), configLoaded: true });
       }
     } catch (err) {
-      console.error('[Spots] Failed to load:', err);
+      console.error('[FurnitureConfig] Failed to load:', err);
+    }
+  },
+
+  reloadConfig: async () => {
+    try {
+      const res = await fetch(api('/api/furniture-config'));
+      if (res.ok) {
+        const config: FurnitureConfig = await res.json();
+        applyFurnitureConfig(config);
+        const { layout, currentScene } = get();
+        set({ grid: buildGrid(layout, wallRowsFor(currentScene)) });
+        console.log('[FurnitureConfig] Reloaded');
+      }
+    } catch (err) {
+      console.error('[FurnitureConfig] Failed to reload:', err);
     }
   },
 
@@ -216,6 +310,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     // Save current scene's layout+inventory
     saveLayout(layout, currentScene);
     saveInventory(inventory, currentScene);
+    debouncedSync(currentScene, layout, inventory);
     // Load target scene
     const newLayout = loadLayout(scene);
     const newInventory = loadInventory(newLayout.furniture.map(f => f.id), scene);
@@ -230,16 +325,11 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       placing: null,
       placingRot: 0,
       draggingRot: 0,
-      draggingSpot: null,
     });
   },
 
   setMode: (mode) => {
-    const prev = get().mode;
-    if (prev === 'spot-edit' && mode !== 'spot-edit') {
-      get().saveSpots();
-    }
-    set({ mode, dragging: null, draggingSpot: null, resizing: null, resizeType: null, placing: null, placingRot: 0, draggingRot: 0 });
+    set({ mode, dragging: null, placing: null, placingRot: 0, draggingRot: 0 });
   },
 
   moveFurniture: (id, gx, gy, rot) => {
@@ -256,6 +346,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
     set({ layout: newLayout, grid: newGrid });
     saveLayout(newLayout, currentScene);
+    debouncedSync(currentScene, newLayout, get().inventory);
     return true;
   },
 
@@ -274,6 +365,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     set({ layout: newLayout, grid: newGrid, inventory: newInventory, placing: null, placingRot: 0 });
     saveLayout(newLayout, currentScene);
     saveInventory(newInventory, currentScene);
+    debouncedSync(currentScene, newLayout, newInventory);
     return true;
   },
 
@@ -289,6 +381,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     set({ layout: newLayout, grid: newGrid, inventory: newInventory, dragging: null });
     saveLayout(newLayout, currentScene);
     saveInventory(newInventory, currentScene);
+    debouncedSync(currentScene, newLayout, newInventory);
   },
 
   startPlacing: (id) => set({ placing: id, dragging: null, placingRot: 0 }),
@@ -302,64 +395,67 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   endDrag: () => set({ dragging: null }),
   cycleDraggingRot: () => set(s => ({ draggingRot: ((s.draggingRot + 1) % 4) as FurnitureRotation })),
 
-  startSpotDrag: (id) => set({ draggingSpot: id }),
-  endSpotDrag: () => set({ draggingSpot: null }),
-
-  setSpotEdit: (id, spotDx, spotDy) => {
-    const { pendingSpots } = get();
-    set({ pendingSpots: { ...pendingSpots, [id]: { spotDx, spotDy } } });
-  },
-
-  saveSpots: async () => {
-    const { pendingSpots } = get();
-    if (Object.keys(pendingSpots).length === 0) return;
-
-    const spots: SpotEdits = { ...getActiveSpots() };
-    for (const [id, edit] of Object.entries(pendingSpots)) {
-      spots[id] = edit;
-    }
-
-    try {
-      const res = await fetch('/api/spots', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(spots),
-      });
-      if (res.ok) {
-        applySpots(spots);
-        set({ pendingSpots: {} });
-      }
-    } catch (err) {
-      console.error('[Spots] Failed to save:', err);
-    }
-  },
-
-  resizeGrid: (id, gridW, gridH) => {
-    setGridSize(id, gridW, gridH);
-    const { layout, currentScene } = get();
-    set({ grid: buildGrid(layout, wallRowsFor(currentScene)) });
-  },
 
   resetLayout: () => {
     const { currentScene } = get();
     const defaultLayout = defaultLayoutFor(currentScene);
     const grid = buildGrid(defaultLayout, wallRowsFor(currentScene));
-    set({ layout: defaultLayout, grid });
+    const inventory = loadInventory(defaultLayout.furniture.map(f => f.id), currentScene);
+    set({ layout: defaultLayout, grid, inventory });
     saveLayout(defaultLayout, currentScene);
+    saveInventory(inventory, currentScene);
+    debouncedSync(currentScene, defaultLayout, inventory);
+  },
+
+  syncFromCloud: async () => {
+    const { currentScene } = get();
+    const scenes: SceneId[] = ['room', 'garden', 'bedroom'];
+
+    for (const scene of scenes) {
+      const cloud = await loadFromSupabase(scene);
+      if (cloud && cloud.layout.furniture?.length > 0) {
+        // Ensure all items have rot
+        cloud.layout.furniture = cloud.layout.furniture.map(f => ({ ...f, rot: f.rot ?? 0 }));
+
+        // Ensure required pieces exist
+        const placedIds = new Set(cloud.layout.furniture.map(f => f.id));
+        const requiredDefs = registry.getAllDefs().filter(d => {
+          if (!d.required) return false;
+          return (d.scene ?? 'room') === scene;
+        });
+        for (const def of requiredDefs) {
+          if (!placedIds.has(def.id)) {
+            const dl = defaultLayoutFor(scene);
+            const defaultPlaced = dl.furniture.find(f => f.id === def.id);
+            cloud.layout.furniture.push(defaultPlaced ?? { id: def.id, gx: 10, gy: 18, rot: 0 });
+          }
+        }
+
+        // Save to localStorage
+        saveLayout(cloud.layout, scene);
+        saveInventory(cloud.inventory, scene);
+
+        // If this is the active scene, update state
+        if (scene === currentScene) {
+          const grid = buildGrid(cloud.layout, wallRowsFor(scene));
+          set({ layout: cloud.layout, grid, inventory: cloud.inventory });
+        }
+
+        console.log('[RoomSync] Loaded', scene, 'from cloud:', cloud.layout.furniture.length, 'pieces');
+      } else {
+        // No cloud data — push local to cloud
+        const localLayout = loadLayout(scene);
+        const localInventory = loadInventory(localLayout.furniture.map(f => f.id), scene);
+        syncToSupabase(scene, localLayout, localInventory);
+        console.log('[RoomSync] Pushed', scene, 'to cloud:', localLayout.furniture.length, 'pieces');
+      }
+    }
   },
 
   getSpot: (furnitureId) => {
-    const { layout, pendingSpots } = get();
+    const { layout } = get();
     const placed = layout.furniture.find((f) => f.id === furnitureId);
     if (!placed) return null;
-
-    const pending = pendingSpots[furnitureId];
-    if (pending) {
-      return {
-        x: (placed.gx + pending.spotDx) * 8,
-        y: (placed.gy + pending.spotDy) * 8,
-      };
-    }
     return getSpotPixel(placed);
   },
 }));

@@ -5,10 +5,11 @@ import type { FurnitureDef } from '../types';
 // This registration exists so Igni can walk to it and the chat system can reference it.
 
 export const def: FurnitureDef = {
-  id: 'window', label: 'Window', gridW: 9, gridH: 1,
-  spotDx: 4, spotDy: 3, canOverlapWall: true, zone: 'wall', drawKey: 'window',
+  id: 'window', label: 'Window', gridW: 6, gridH: 4,
+  spotDx: 3, spotDy: 7, canOverlapWall: true, zone: 'wall', drawKey: 'window',
   category: 'structural', tags: ['weather', 'outside'],
   required: true,
+  hiResSprites: { 0: '/furniture/window-front-clean.png' },
 };
 
 // No-op draw — the window is rendered by drawWindow() in IgnisScene

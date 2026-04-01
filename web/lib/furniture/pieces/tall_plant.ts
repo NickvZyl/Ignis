@@ -5,6 +5,7 @@ export const def: FurnitureDef = {
   id: 'tall_plant', label: 'Tall Plant', gridW: 2, gridH: 3,
   spotDx: 2, spotDy: 2, canOverlapWall: false, drawKey: 'tall_plant',
   category: 'nature', tags: [],
+  hiResSprites: { 0: '/furniture/tall_plant-front-clean.png' },
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number, ts: number) {

@@ -2,10 +2,11 @@ import { registry } from '../registry';
 import type { FurnitureDef, FurnitureGlowFn } from '../types';
 
 export const def: FurnitureDef = {
-  id: 'nightstand', label: 'Nightstand', gridW: 2, gridH: 2,
-  spotDx: 1, spotDy: 2, canOverlapWall: false, drawKey: 'nightstand',
+  id: 'nightstand', label: 'Nightstand', gridW: 2, gridH: 1,
+  spotDx: 1, spotDy: 1.25, canOverlapWall: false, drawKey: 'nightstand',
   category: 'surface', tags: ['sleep'],
   scene: 'bedroom',
+  hiResSprites: { 0: '/furniture/nightstand-front-clean.png' },
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number, ts: number) {

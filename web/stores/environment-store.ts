@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '@web/lib/supabase';
+import { api } from '@web/lib/api';
 
 interface WeatherData {
   timezone: string;
@@ -95,7 +96,7 @@ export const useEnvironmentStore = create<EnvironmentState>((set, get) => ({
 
       set({ location });
 
-      const res = await fetch(`/api/weather?location=${encodeURIComponent(location)}`);
+      const res = await fetch(api(`/api/weather?location=${encodeURIComponent(location)}`));
       const data = await res.json();
 
       if (data.error) {

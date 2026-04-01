@@ -19,7 +19,7 @@ function colorToRGB(hex: string) {
 
 export default function Avatar() {
   const emotionalState = useCompanionStore((s) => s.emotionalState);
-  const emotion = emotionalState?.active_emotion ?? 'warm';
+  const emotion = emotionalState?.active_emotion ?? 'calm';
   const role = emotionalState?.active_role ?? null;
   const drift = emotionalState?.drift ?? 0;
 
@@ -31,7 +31,7 @@ export default function Avatar() {
   const eB = useSharedValue(emotionRGB.b);
 
   // Role color (only used when role is not null)
-  const roleColor = role ? ROLE_COLORS[role] : EMOTION_COLORS.warm;
+  const roleColor = role ? ROLE_COLORS[role] : EMOTION_COLORS.calm;
   const roleRGB = colorToRGB(roleColor);
   const rR = useSharedValue(roleRGB.r);
   const rG = useSharedValue(roleRGB.g);

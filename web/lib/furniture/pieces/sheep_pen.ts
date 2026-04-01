@@ -6,6 +6,7 @@ export const def: FurnitureDef = {
   spotDx: 2, spotDy: 3, canOverlapWall: false, drawKey: 'sheep_pen',
   category: 'nature', tags: ['animals'],
   scene: 'garden',
+  hiResSprites: { 0: '/furniture/sheep_pen-front-clean.png' },
 };
 
 function drawSheep(ctx: CanvasRenderingContext2D, cx: number, cy: number, ts: number, seed: number, flip: boolean) {

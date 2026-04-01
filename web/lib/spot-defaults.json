@@ -1,15 +1,19 @@
 {
   "desk": {
-    "spotDx": 2,
-    "spotDy": 3
+    "spotDx": 1.706100368437844,
+    "spotDy": 0.20586619859442123
   },
   "bookshelf": {
-    "spotDx": 2,
-    "spotDy": 2
+    "spotDx": 0.4718955139639558,
+    "spotDy": 2.062392741700908
   },
   "couch": {
-    "spotDx": 3.986376404700689,
-    "spotDy": 2.81774130887133
+    "spotDx": 2.9091069664518336,
+    "spotDy": 3.2656694369657657
+  },
+  "tv": {
+    "spotDx": -0.7889280585217744,
+    "spotDy": -2.0115689798702903
   },
   "fireplace": {
     "spotDx": 1,
@@ -56,8 +60,8 @@
     "spotDy": 2
   },
   "window": {
-    "spotDx": 4,
-    "spotDy": 3
+    "spotDx": 4.767401826783551,
+    "spotDy": 2.95566406748112
   },
   "garden_gate": {
     "spotDx": 1,

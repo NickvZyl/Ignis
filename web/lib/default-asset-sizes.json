@@ -1,0 +1,164 @@
+{
+  "desk_r0": {
+    "widthPx": 160,
+    "heightPx": 224,
+    "offsetX": 0,
+    "offsetY": -64
+  },
+  "fireplace_r0": {
+    "widthPx": 128,
+    "heightPx": 240,
+    "offsetX": 0,
+    "offsetY": -80
+  },
+  "fridge_r0": {
+    "widthPx": 64,
+    "heightPx": 230,
+    "offsetX": 0,
+    "offsetY": -102
+  },
+  "clock_table_r0": {
+    "widthPx": 67,
+    "heightPx": 115,
+    "offsetX": 15,
+    "offsetY": -19
+  },
+  "plant_r0": {
+    "widthPx": 51,
+    "heightPx": 83,
+    "offsetX": 7,
+    "offsetY": -19
+  },
+  "tall_plant_r0": {
+    "widthPx": 51,
+    "heightPx": 173,
+    "offsetX": 7,
+    "offsetY": -77
+  },
+  "succulent_r0": {
+    "widthPx": 32,
+    "heightPx": 38,
+    "offsetX": 0,
+    "offsetY": -6
+  },
+  "floor_lamp_r0": {
+    "widthPx": 38,
+    "heightPx": 211,
+    "offsetX": 13,
+    "offsetY": -115
+  },
+  "couch_r0": {
+    "widthPx": 224,
+    "heightPx": 128,
+    "offsetX": 0,
+    "offsetY": 32
+  },
+  "bookshelf_r0": {
+    "widthPx": 128,
+    "heightPx": 160,
+    "offsetX": 0,
+    "offsetY": -96
+  },
+  "kitchen_r0": {
+    "widthPx": 160,
+    "heightPx": 154,
+    "offsetX": 0,
+    "offsetY": -58
+  },
+  "tv_r0": {
+    "widthPx": 96,
+    "heightPx": 77,
+    "offsetX": 0,
+    "offsetY": -13
+  },
+  "front_door_r0": {
+    "widthPx": 77,
+    "heightPx": 160,
+    "offsetX": 10,
+    "offsetY": -96
+  },
+  "hallway_door_r0": {
+    "widthPx": 45,
+    "heightPx": 192,
+    "offsetX": 10,
+    "offsetY": -96
+  },
+  "ceiling_light_r0": {
+    "widthPx": 51,
+    "heightPx": 80,
+    "offsetX": 7,
+    "offsetY": -48
+  },
+  "wall_sconce_r0": {
+    "widthPx": 32,
+    "heightPx": 77,
+    "offsetX": 0,
+    "offsetY": -13
+  },
+  "window_r0": {
+    "widthPx": 288,
+    "heightPx": 128,
+    "offsetX": 0,
+    "offsetY": -96
+  },
+  "bed_r0": {
+    "widthPx": 160,
+    "heightPx": 144,
+    "offsetX": 0,
+    "offsetY": -48
+  },
+  "nightstand_r0": {
+    "widthPx": 51,
+    "heightPx": 77,
+    "offsetX": 7,
+    "offsetY": -13
+  },
+  "wardrobe_r0": {
+    "widthPx": 86,
+    "heightPx": 205,
+    "offsetX": 5,
+    "offsetY": -77
+  },
+  "bedroom_door_r0": {
+    "widthPx": 77,
+    "heightPx": 160,
+    "offsetX": 10,
+    "offsetY": -96
+  },
+  "bedroom_window_r0": {
+    "widthPx": 128,
+    "heightPx": 125,
+    "offsetX": 0,
+    "offsetY": -29
+  },
+  "garden_gate_r0": {
+    "widthPx": 96,
+    "heightPx": 96,
+    "offsetX": 0,
+    "offsetY": -32
+  },
+  "farm_patch_r0": {
+    "widthPx": 128,
+    "heightPx": 86,
+    "offsetX": 0,
+    "offsetY": 10
+  },
+  "cow_pen_r0": {
+    "widthPx": 160,
+    "heightPx": 141,
+    "offsetX": 0,
+    "offsetY": -13
+  },
+  "sheep_pen_r0": {
+    "widthPx": 128,
+    "heightPx": 106,
+    "offsetX": 0,
+    "offsetY": -10
+  },
+  "chicken_coop_r0": {
+    "widthPx": 128,
+    "heightPx": 115,
+    "offsetX": 0,
+    "offsetY": -19
+  }
+}

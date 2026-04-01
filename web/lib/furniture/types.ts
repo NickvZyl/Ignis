@@ -22,6 +22,7 @@ export interface FurnitureDef {
   perimeterOnly?: boolean; // must be placed on room edge
   scene?: 'room' | 'garden' | 'bedroom'; // which scene this belongs to (undefined = 'room')
   hiResSprites?: Record<number, string>; // per-rotation image URLs (drawn on bg canvas at display res)
+  hiResAnimate?: (ctx: CanvasRenderingContext2D, dx: number, dy: number, dw: number, dh: number, ts: number, rot: number) => void;
 }
 
 export type FurnitureRotation = 0 | 1 | 2 | 3; // 0=down, 1=right, 2=up, 3=left (90° CW increments)

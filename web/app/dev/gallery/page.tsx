@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { registry } from '@web/lib/furniture';
-import { FURNITURE_DEFS } from '@web/lib/room-grid';
+
 import type { FurnitureDef } from '@web/lib/furniture';
 import { drawSceneBackground, SCENE_W, SCENE_H } from '@web/lib/scene-backgrounds';
 
@@ -10,19 +10,20 @@ const THUMB_SCALE = 3;
 const FOCUS_SCALE = 8;
 const SCENES = ['room', 'garden', 'bedroom'] as const;
 const FONT = "'Segoe UI', system-ui, sans-serif";
+const ROTATION_LABELS: Record<number, string> = { 0: 'Front', 1: 'Right', 2: 'Back', 3: 'Left' };
 
 const FILE_MAP: Record<string, string> = {};
 // Auto-populate from known piece IDs
 const ALL_IDS = [
-  'desk','bookshelf','couch','fireplace','clock_table','kitchen','fridge','plant',
-  'front_door','tall_plant','succulent','floor_lamp','wall_sconce','window',
+  'desk','bookshelf','couch','tv','fireplace','clock_table','kitchen','fridge','plant',
+  'front_door','tall_plant','succulent','floor_lamp','wall_sconce','ceiling_light','window',
   'garden_gate','farm_patch','chicken_coop','cow_pen','sheep_pen',
   'hallway_door','bedroom_door','bed','nightstand','wardrobe','bedroom_window',
 ];
 ALL_IDS.forEach(id => { FILE_MAP[id] = `web/lib/furniture/pieces/${id}.ts`; });
 
-// ── Animated canvas renderer ──
-function useAnimatedCanvas(
+// ── Hi-res sprite renderer ──
+function useHiResCanvas(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
   def: FurnitureDef | null,
   scale: number,
@@ -36,48 +37,34 @@ function useAnimatedCanvas(
     canvas.width = pw * scale;
     canvas.height = ph * scale;
 
-    // Hi-res sprite: show the image instead of procedural draw
     const hiResSrc = def.hiResSprites?.[0] as string | undefined;
     if (hiResSrc) {
       const img = new Image();
       img.src = hiResSrc;
       img.onload = () => {
         ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-        // Fit the image maintaining aspect ratio
         const aspect = img.naturalHeight / img.naturalWidth;
         const dw = canvas.width;
         const dh = dw * aspect;
         const dy = Math.max(0, canvas.height - dh);
         ctx.drawImage(img, 0, dy, dw, dh);
       };
-      return;
+    } else {
+      // Fallback: colored placeholder
+      ctx.fillStyle = 'rgba(100,100,200,0.3)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#888';
+      ctx.font = `${scale * 3}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(def.id, canvas.width / 2, canvas.height / 2);
     }
-
-    // Procedural draw
-    let animId: number;
-    const draw = () => {
-      const ts = performance.now();
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (let y = 0; y < ph; y++) for (let x = 0; x < pw; x++) {
-        ctx.fillStyle = (x + y) % 2 === 0 ? '#2a2a2e' : '#222228';
-        ctx.fillRect(x * scale, y * scale, scale, scale);
-      }
-      ctx.save();
-      ctx.scale(scale, scale);
-      const drawFn = registry.getDraw(def.drawKey);
-      if (drawFn) drawFn(ctx, 0, 0, ts);
-      ctx.restore();
-      animId = requestAnimationFrame(draw);
-    };
-    draw();
-    return () => cancelAnimationFrame(animId);
   }, [canvasRef, def, scale]);
 }
 
 // ── Thumbnail card ──
 function FurnitureCard({ def, selected, onSelect }: { def: FurnitureDef; selected: boolean; onSelect: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  useAnimatedCanvas(canvasRef, def, THUMB_SCALE);
+  useHiResCanvas(canvasRef, def, THUMB_SCALE);
 
   const pw = def.gridW * 8;
   const ph = def.gridH * 8;
@@ -105,10 +92,93 @@ function FurnitureCard({ def, selected, onSelect }: { def: FurnitureDef; selecte
   );
 }
 
+// ── Sprite angle viewer ──
+function SpriteAngleCard({ src, label, selected, onClick }: { src: string; label: string; selected: boolean; onClick: () => void }) {
+  return (
+    <div onClick={onClick} style={{
+      cursor: 'pointer',
+      border: selected ? '2px solid #F59E0B' : '2px solid #333',
+      borderRadius: 4,
+      padding: 4,
+      background: selected ? '#2a2420' : '#111',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 4,
+      transition: 'border-color 0.15s',
+    }}>
+      <img src={src} alt={label} style={{
+        width: 120,
+        height: 'auto',
+        imageRendering: 'auto',
+        borderRadius: 2,
+      }} />
+      <div style={{ fontSize: 12, color: selected ? '#F59E0B' : '#888' }}>{label}</div>
+    </div>
+  );
+}
+
+function SpriteAnglesViewer({ def }: { def: FurnitureDef }) {
+  const [selectedAngle, setSelectedAngle] = useState(0);
+  const sprites = def.hiResSprites;
+  if (!sprites) return null;
+
+  const angles = Object.entries(sprites).map(([rot, src]) => ({
+    rot: Number(rot),
+    src: src as string,
+    label: ROTATION_LABELS[Number(rot)] ?? `Rot ${rot}`,
+  }));
+
+  const activeSrc = sprites[selectedAngle] as string | undefined;
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 14, color: '#F59E0B', marginBottom: 8 }}>SPRITE ANGLES ({angles.length})</div>
+
+      {/* Large preview of selected angle */}
+      {activeSrc && (
+        <div style={{
+          background: '#0a0a0e',
+          border: '1px solid #333',
+          borderRadius: 4,
+          padding: 8,
+          marginBottom: 8,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 4,
+        }}>
+          <img src={activeSrc} alt={ROTATION_LABELS[selectedAngle]} style={{
+            maxWidth: '100%',
+            maxHeight: 300,
+            imageRendering: 'auto',
+          }} />
+          <div style={{ fontSize: 13, color: '#888' }}>
+            {ROTATION_LABELS[selectedAngle]} (rotation {selectedAngle})
+          </div>
+        </div>
+      )}
+
+      {/* Thumbnails row */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {angles.map(({ rot, src, label }) => (
+          <SpriteAngleCard
+            key={rot}
+            src={src}
+            label={label}
+            selected={selectedAngle === rot}
+            onClick={() => setSelectedAngle(rot)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Focus panel (selected piece detail) ──
 function FocusPanel({ def, onClose }: { def: FurnitureDef; onClose: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  useAnimatedCanvas(canvasRef, def, FOCUS_SCALE);
+  useHiResCanvas(canvasRef, def, FOCUS_SCALE);
 
   const [prompt, setPrompt] = useState('');
   const [savedPrompts, setSavedPrompts] = useState<string[]>([]);
@@ -187,10 +257,11 @@ function FocusPanel({ def, onClose }: { def: FurnitureDef; onClose: () => void }
       gap: 20,
       marginBottom: 20,
     }}>
-      {/* Left: large preview */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+      {/* Left: large preview + angles */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, minWidth: 280 }}>
         <canvas ref={canvasRef} style={{ imageRendering: 'pixelated', borderRadius: 4 }} />
         <div style={{ fontSize: 16, color: '#555' }}>{pw}x{ph}px @ {FOCUS_SCALE}x</div>
+        {def.hiResSprites && <SpriteAnglesViewer def={def} />}
       </div>
 
       {/* Right: info + prompt */}
@@ -316,7 +387,7 @@ const BG_THUMB_SCALE = 2;
 const BG_FOCUS_SCALE = 4;
 const BG_SCENES: { id: string; label: string; scene: string; file: string; imgSrc?: string }[] = [
   { id: 'bg_room', label: 'Living Room', scene: 'room', file: 'web/public/room-bg.png', imgSrc: '/room-bg.png' },
-  { id: 'bg_bedroom', label: 'Bedroom', scene: 'bedroom', file: 'web/lib/scene-backgrounds.ts (drawBedroomFloor + drawBedroomWalls)' },
+  { id: 'bg_bedroom', label: 'Bedroom', scene: 'bedroom', file: 'web/public/bedroom-bg.png', imgSrc: '/bedroom-bg.png' },
   { id: 'bg_garden', label: 'Garden', scene: 'garden', file: 'web/public/garden-bg.png', imgSrc: '/garden-bg.png' },
 ];
 
@@ -379,6 +450,19 @@ function BackgroundFocusPanel({ bg, onClose }: { bg: typeof BG_SCENES[0]; onClos
     canvas.width = SCENE_W * BG_FOCUS_SCALE;
     canvas.height = SCENE_H * BG_FOCUS_SCALE;
     const ctx = canvas.getContext('2d')!;
+
+    if (bg.imgSrc) {
+      // Use hi-res image
+      const img = new Image();
+      img.src = bg.imgSrc;
+      img.onload = () => {
+        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      };
+      return;
+    }
+
+    // Fallback to procedural
     let animId: number;
     const draw = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -389,7 +473,7 @@ function BackgroundFocusPanel({ bg, onClose }: { bg: typeof BG_SCENES[0]; onClos
     };
     draw();
     return () => cancelAnimationFrame(animId);
-  }, [bg.scene]);
+  }, [bg.scene, bg.imgSrc]);
 
   useEffect(() => {
     try { const r = localStorage.getItem(`furniture_prompts_${bg.id}`); if (r) setSavedPrompts(JSON.parse(r)); else setSavedPrompts([]); } catch { setSavedPrompts([]); }

@@ -4,18 +4,18 @@ import { useCompanionStore } from '@web/stores/companion-store';
 import { EMOTION_COLORS, ROLE_COLORS } from '@/constants/ignisColors';
 
 const EMOTION_DESC: Record<string, string> = {
-  bright: 'energised',
-  intense: 'passionate',
-  grounded: 'calm',
-  reflective: 'thoughtful',
-  deep: 'introspective',
-  warm: 'affectionate',
-  eager: 'motivated',
+  happy: 'happy', excited: 'excited', playful: 'playful', proud: 'proud',
+  grateful: 'grateful', cozy: 'cozy', calm: 'calm', curious: 'curious',
+  focused: 'focused', thoughtful: 'thoughtful', dreamy: 'dreamy',
+  sleepy: 'sleepy', spacedout: 'spaced out', sad: 'sad',
+  frustrated: 'frustrated', worried: 'worried', lonely: 'lonely',
+  hurt: 'hurt', bored: 'bored', grumpy: 'grumpy', overwhelmed: 'overwhelmed',
+  annoyed: 'annoyed', tender: 'tender', nostalgic: 'nostalgic', shy: 'shy',
 };
 
 export default function Avatar() {
   const emotionalState = useCompanionStore((s) => s.emotionalState);
-  const emotion = emotionalState?.active_emotion ?? 'warm';
+  const emotion = emotionalState?.active_emotion ?? 'calm';
   const role = emotionalState?.active_role ?? null;
   const drift = emotionalState?.drift ?? 0;
 

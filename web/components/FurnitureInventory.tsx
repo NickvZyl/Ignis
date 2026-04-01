@@ -2,47 +2,28 @@
 
 import { useRoomStore } from '@web/stores/room-store';
 import { FURNITURE_DEFS } from '@web/lib/room-grid';
-import { registry } from '@web/lib/furniture';
-import { useRef, useEffect } from 'react';
 
-const THUMB_W = 48;
-const THUMB_H = 36;
+const THUMB_SIZE = 48;
 
-// Render a tiny preview of a furniture piece into a canvas
 function FurnitureThumb({ id }: { id: string }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d')!;
-    ctx.clearRect(0, 0, THUMB_W, THUMB_H);
-
-    const def = FURNITURE_DEFS[id];
-    if (!def) return;
-    const drawFn = registry.getDraw(def.drawKey);
-    if (!drawFn) return;
-
-    // Center the furniture in the thumbnail
-    const pw = def.gridW * 8;
-    const ph = def.gridH * 8;
-    const scale = Math.min(THUMB_W / pw, THUMB_H / ph, 2);
-    ctx.save();
-    ctx.translate(
-      (THUMB_W - pw * scale) / 2,
-      (THUMB_H - ph * scale) / 2,
+  const def = FURNITURE_DEFS[id];
+  const src = def?.hiResSprites?.[0];
+  if (!src) {
+    return (
+      <div
+        style={{ width: THUMB_SIZE, height: THUMB_SIZE, background: 'rgba(100,100,200,0.2)', borderRadius: 4 }}
+        className="flex items-center justify-center text-[6px] text-gray-500 shrink-0"
+      >
+        {id}
+      </div>
     );
-    ctx.scale(scale, scale);
-    drawFn(ctx, 0, 0, Date.now());
-    ctx.restore();
-  }, [id]);
-
+  }
   return (
-    <canvas
-      ref={ref}
-      width={THUMB_W}
-      height={THUMB_H}
-      style={{ imageRendering: 'pixelated' }}
+    <img
+      src={src}
+      alt={def?.label ?? id}
+      style={{ width: THUMB_SIZE, height: THUMB_SIZE, objectFit: 'contain', imageRendering: 'auto' }}
+      className="shrink-0"
     />
   );
 }
@@ -51,8 +32,6 @@ export default function FurnitureInventory() {
   const { layout, inventory, mode, placing, startPlacing, cancelPlacing, removeFromRoom } = useRoomStore();
 
   if (mode !== 'edit') return null;
-
-  const placedIds = layout.furniture.map(f => f.id);
 
   return (
     <div

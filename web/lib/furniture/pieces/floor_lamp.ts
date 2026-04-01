@@ -1,10 +1,26 @@
 import { registry } from '../registry';
 import type { FurnitureDef } from '../types';
 
+function animateFloorLamp(
+  ctx: CanvasRenderingContext2D, dx: number, dy: number, dw: number, dh: number, ts: number,
+) {
+  // Warm glow from shade area
+  const pulse = Math.sin(ts * 0.002) * 0.08 + 0.35;
+  const cx = dx + dw * 0.48, cy = dy + dh * 0.15, r = dw * 0.2;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2);
+  g.addColorStop(0, `rgba(255,220,150,${pulse})`);
+  g.addColorStop(0.5, `rgba(255,200,120,${pulse * 0.4})`);
+  g.addColorStop(1, 'rgba(255,180,100,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(cx - r * 2, cy - r * 2, r * 4, r * 4);
+}
+
 export const def: FurnitureDef = {
   id: 'floor_lamp', label: 'Floor Lamp', gridW: 2, gridH: 3,
   spotDx: 2, spotDy: 2, canOverlapWall: false, drawKey: 'floor_lamp',
   category: 'lighting', tags: [],
+  hiResSprites: { 0: '/furniture/floor_lamp-front-clean.png' },
+  hiResAnimate: animateFloorLamp,
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number, ts: number) {

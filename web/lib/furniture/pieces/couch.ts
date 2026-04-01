@@ -5,6 +5,12 @@ export const def: FurnitureDef = {
   id: 'couch', label: 'Couch', gridW: 7, gridH: 5,
   spotDx: 3, spotDy: -1, canOverlapWall: false, drawKey: 'couch',
   category: 'seating', tags: ['relaxation'],
+  hiResSprites: {
+    0: '/furniture/couch-front-clean.png',
+    1: '/furniture/couch-right-clean.png',
+    2: '/furniture/couch-back-clean.png',
+    3: '/furniture/couch-left-clean.png',
+  },
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number) {
@@ -71,13 +77,6 @@ export function draw(ctx: CanvasRenderingContext2D, x: number, y: number) {
     ctx.fillRect(x+38+dx, y+3+dy, 1, 1);
   }
 
-  // TV on floor in front
-  for (let dx=0;dx<20;dx++) for (let dy=0;dy<12;dy++) {
-    ctx.fillStyle = (dx===0||dx===19||dy===0||dy===11) ? '#2a2a2a' : '#0a1520';
-    ctx.fillRect(x+15+dx, y+14+dy, 1, 1);
-  }
-  // TV stand
-  ctx.fillStyle='#333';ctx.fillRect(x+23,y+26,4,2);
 }
 
 registry.register(def, draw);

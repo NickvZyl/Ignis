@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Ignis</string>
+    <string name="title_activity_main">Ignis</string>
+    <string name="package_name">com.ignis.app</string>
+    <string name="custom_url_scheme">com.ignis.app</string>
+</resources>

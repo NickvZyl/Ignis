@@ -5,6 +5,7 @@ export const def: FurnitureDef = {
   id: 'clock_table', label: 'Clock', gridW: 3, gridH: 3,
   spotDx: -1, spotDy: 1, canOverlapWall: false, drawKey: 'clock_table',
   category: 'surface', tags: ['timekeeping'],
+  hiResSprites: { 0: '/furniture/clock_table-front-clean.png' },
 };
 
 // checkinRemaining is injected via the extra context system

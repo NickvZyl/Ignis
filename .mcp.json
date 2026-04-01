@@ -1,8 +1,16 @@
 {
   "mcpServers": {
+    "hostinger-api": {
+      "command": "hostinger-api-mcp",
+      "args": [],
+      "env": {
+        "DEBUG": "false",
+        "APITOKEN": "n6zIsAnNEMPGuKSEQsAyARBUGgsEQtQp9Xke7qw9e16207a4"
+      }
+    },
     "supabase": {
       "type": "http",
-      "url": "https://mcp.supabase.com"
+      "url": "https://mcp.supabase.com/mcp?project_ref=oolktmyiavmhgxbvjlpd"
     }
   }
 }

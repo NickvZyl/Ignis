@@ -1,10 +1,39 @@
 import { registry } from '../registry';
 import type { FurnitureDef } from '../types';
 
+function animateFireplace(
+  ctx: CanvasRenderingContext2D, dx: number, dy: number, dw: number, dh: number, ts: number, rot: number,
+) {
+  if (rot !== 0) return;
+  const f1 = Math.sin(ts * 0.008) * 0.2 + 0.5;
+  const f2 = Math.sin(ts * 0.013 + 1.5) * 0.15 + 0.45;
+  // Fire glow in hearth
+  const cx = dx + dw * 0.50, cy = dy + dh * 0.62, r = dw * 0.12;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2.5);
+  g.addColorStop(0, `rgba(255,200,60,${f1 * 0.5})`);
+  g.addColorStop(0.3, `rgba(255,120,20,${f1 * 0.35})`);
+  g.addColorStop(0.7, `rgba(255,60,0,${f2 * 0.2})`);
+  g.addColorStop(1, 'rgba(200,40,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(cx - r * 3, cy - r * 3, r * 6, r * 6);
+  // Candle flickers on mantle
+  const cf = Math.sin(ts * 0.012) * 0.2 + 0.6;
+  for (const c of [{ x: 0.17, y: 0.06 }, { x: 0.83, y: 0.06 }]) {
+    const ccx = dx + dw * c.x, ccy = dy + dh * c.y, cr = dw * 0.02;
+    const cg = ctx.createRadialGradient(ccx, ccy, 0, ccx, ccy, cr * 3);
+    cg.addColorStop(0, `rgba(255,200,80,${cf * 0.6})`);
+    cg.addColorStop(1, 'rgba(255,100,0,0)');
+    ctx.fillStyle = cg;
+    ctx.fillRect(ccx - cr * 3, ccy - cr * 3, cr * 6, cr * 6);
+  }
+}
+
 export const def: FurnitureDef = {
-  id: 'fireplace', label: 'Fireplace', gridW: 4, gridH: 5,
-  spotDx: 2, spotDy: 5, canOverlapWall: false, drawKey: 'fireplace',
+  id: 'fireplace', label: 'Fireplace', gridW: 6, gridH: 3,
+  spotDx: 3, spotDy: 2.5, canOverlapWall: false, drawKey: 'fireplace',
   category: 'decor', tags: ['warmth'],
+  hiResSprites: { 0: '/furniture/fireplace-front-clean.png' },
+  hiResAnimate: animateFireplace,
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number, ts: number) {

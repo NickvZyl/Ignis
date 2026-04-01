@@ -2,6 +2,7 @@
 import './pieces/desk';
 import './pieces/bookshelf';
 import './pieces/couch';
+import './pieces/tv';
 import './pieces/fireplace';
 import './pieces/clock_table';
 import './pieces/kitchen';

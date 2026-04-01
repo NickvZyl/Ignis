@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '@web/lib/supabase';
-import { computeSessionStart, computePostMessage } from '@/lib/emotional-engine';
+import { computeSessionStart, computePostMessage, computeEnvironmentalInfluence } from '@/lib/emotional-engine';
 import type { EmotionalState, EmotionalSignals } from '@/types';
 
 const DEFAULT_STATE: Omit<EmotionalState, 'id' | 'user_id' | 'updated_at'> = {
@@ -8,7 +8,10 @@ const DEFAULT_STATE: Omit<EmotionalState, 'id' | 'user_id' | 'updated_at'> = {
   arousal: 0.4,
   attachment: 0.0,
   drift: 0.0,
-  active_emotion: 'warm',
+  active_emotion: 'calm',
+  secondary_emotion: null,
+  inner_conflict: null,
+  morning_thought: null,
   active_role: null,
   last_interaction_at: new Date().toISOString(),
 };
@@ -20,6 +23,7 @@ interface CompanionState {
   loadState: (userId: string) => Promise<void>;
   applySessionStart: () => Promise<void>;
   processMessage: (message: string) => Promise<EmotionalSignals | null>;
+  applyEnvironment: (scheduleLabel: string, hour: number) => Promise<void>;
 }
 
 export const useCompanionStore = create<CompanionState>((set, get) => ({
@@ -68,6 +72,14 @@ export const useCompanionStore = create<CompanionState>((set, get) => ({
       .from('emotional_state')
       .update(changes)
       .eq('user_id', emotionalState.user_id);
+
+    // Trigger reflection after long absence (>4 hours)
+    const hoursSince = (Date.now() - new Date(emotionalState.last_interaction_at).getTime()) / (1000 * 60 * 60);
+    if (hoursSince > 4) {
+      import('./reflection-store').then(({ useReflectionStore }) => {
+        useReflectionStore.getState().runReflectionCycle(emotionalState.user_id);
+      });
+    }
   },
 
   processMessage: async (message: string) => {
@@ -84,5 +96,31 @@ export const useCompanionStore = create<CompanionState>((set, get) => ({
       .eq('user_id', emotionalState.user_id);
 
     return signals;
+  },
+
+  applyEnvironment: async (scheduleLabel: string, hour: number) => {
+    const { emotionalState } = get();
+    if (!emotionalState) return;
+
+    const changes = computeEnvironmentalInfluence(emotionalState, scheduleLabel, hour);
+    if (Object.keys(changes).length === 0) return;
+
+    const updated = { ...emotionalState, ...changes, updated_at: new Date().toISOString() };
+    set({ emotionalState: updated });
+
+    // Await persistence when drift changed (important for cross-session consistency)
+    if ('drift' in changes) {
+      await supabase
+        .from('emotional_state')
+        .update(changes)
+        .eq('user_id', emotionalState.user_id);
+    } else {
+      // Fire-and-forget for minor environment shifts
+      supabase
+        .from('emotional_state')
+        .update(changes)
+        .eq('user_id', emotionalState.user_id)
+        .then(() => {});
+    }
   },
 }));

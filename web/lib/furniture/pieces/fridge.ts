@@ -5,6 +5,7 @@ export const def: FurnitureDef = {
   id: 'fridge', label: 'Fridge', gridW: 2, gridH: 4,
   spotDx: 2, spotDy: 2, canOverlapWall: false, drawKey: 'fridge',
   category: 'appliance', tags: [],
+  hiResSprites: { 0: '/furniture/fridge-front-clean.png' },
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number) {

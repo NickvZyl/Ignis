@@ -30,6 +30,55 @@ export interface RoomLayout {
 
 export type SpotData = Record<string, { spotDx: number; spotDy: number }>;
 
+// ── Unified furniture config ──
+export interface SpriteSize { widthPx: number; heightPx: number; offsetX: number; offsetY: number; }
+export interface FurniturePieceConfig {
+  gridW?: number;
+  gridH?: number;
+  spotDx?: number;
+  spotDy?: number;
+  sprite?: SpriteSize;
+  spriteOverrides?: Record<string, SpriteSize>;
+}
+export type FurnitureConfig = Record<string, FurniturePieceConfig>;
+
+let furnitureConfig: FurnitureConfig = {};
+
+export function applyFurnitureConfig(config: FurnitureConfig) {
+  furnitureConfig = config;
+  for (const [id, cfg] of Object.entries(config)) {
+    const def = FURNITURE_DEFS[id];
+    if (!def) continue;
+    if (cfg.gridW !== undefined) def.gridW = cfg.gridW;
+    if (cfg.gridH !== undefined) def.gridH = cfg.gridH;
+    if (cfg.spotDx !== undefined) def.spotDx = cfg.spotDx;
+    if (cfg.spotDy !== undefined) def.spotDy = cfg.spotDy;
+  }
+}
+
+export function getFurnitureConfig(): FurnitureConfig {
+  return furnitureConfig;
+}
+
+export function getSpriteSize(id: string, rot: number): SpriteSize | null {
+  const cfg = furnitureConfig[id];
+  if (!cfg) return null;
+  if (rot !== 0 && cfg.spriteOverrides?.[String(rot)]) return cfg.spriteOverrides[String(rot)];
+  return cfg.sprite ?? null;
+}
+
+export function updateFurnitureConfig(id: string, updates: Partial<FurniturePieceConfig>) {
+  if (!furnitureConfig[id]) furnitureConfig[id] = {};
+  Object.assign(furnitureConfig[id], updates);
+  const def = FURNITURE_DEFS[id];
+  if (def) {
+    if (updates.gridW !== undefined) def.gridW = updates.gridW;
+    if (updates.gridH !== undefined) def.gridH = updates.gridH;
+    if (updates.spotDx !== undefined) def.spotDx = updates.spotDx;
+    if (updates.spotDy !== undefined) def.spotDy = updates.spotDy;
+  }
+}
+
 // Live lookup into registry — always returns the latest def (survives HMR)
 export const FURNITURE_DEFS: Record<string, FurnitureDef> = new Proxy({} as Record<string, FurnitureDef>, {
   get(_target, prop: string) {
@@ -48,71 +97,6 @@ export const FURNITURE_DEFS: Record<string, FurnitureDef> = new Proxy({} as Reco
   },
 });
 
-// Grid size overrides — set via edit mode, persisted to localStorage
-const GRID_SIZES_KEY = 'ignis_grid_sizes';
-type GridSizeOverrides = Record<string, { gridW: number; gridH: number }>;
-
-let gridSizeOverrides: GridSizeOverrides = {};
-
-export function loadGridSizes() {
-  try {
-    const raw = localStorage.getItem(GRID_SIZES_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      // Purge corrupted entries
-      gridSizeOverrides = {};
-      for (const [id, size] of Object.entries(parsed)) {
-        const s = size as { gridW: number; gridH: number };
-        if (typeof s.gridW === 'number' && isFinite(s.gridW) && s.gridW >= 1 &&
-            typeof s.gridH === 'number' && isFinite(s.gridH) && s.gridH >= 1) {
-          gridSizeOverrides[id] = s;
-        }
-      }
-      if (Object.keys(gridSizeOverrides).length !== Object.keys(parsed).length) {
-        localStorage.setItem(GRID_SIZES_KEY, JSON.stringify(gridSizeOverrides));
-      }
-      // Apply to defs
-      for (const [id, size] of Object.entries(gridSizeOverrides)) {
-        const def = FURNITURE_DEFS[id];
-        if (def) {
-          def.gridW = size.gridW;
-          def.gridH = size.gridH;
-        }
-      }
-    }
-  } catch {}
-}
-
-export function setGridSize(id: string, gridW: number, gridH: number) {
-  gridSizeOverrides[id] = { gridW, gridH };
-  const def = FURNITURE_DEFS[id];
-  if (def) {
-    def.gridW = gridW;
-    def.gridH = gridH;
-  }
-  localStorage.setItem(GRID_SIZES_KEY, JSON.stringify(gridSizeOverrides));
-}
-
-// Mutable spot data — overridden at runtime by spot-defaults.json via API
-let activeSpots: SpotData = {};
-
-export function applySpots(spots: SpotData) {
-  activeSpots = { ...spots };
-  for (const [id, s] of Object.entries(spots)) {
-    if (FURNITURE_DEFS[id]) {
-      FURNITURE_DEFS[id].spotDx = s.spotDx;
-      FURNITURE_DEFS[id].spotDy = s.spotDy;
-    }
-  }
-}
-
-export function getActiveSpots(): SpotData {
-  const spots: SpotData = {};
-  for (const [id, def] of Object.entries(FURNITURE_DEFS)) {
-    spots[id] = { spotDx: def.spotDx, spotDy: def.spotDy };
-  }
-  return { ...spots, ...activeSpots };
-}
 
 export const DEFAULT_LAYOUT: RoomLayout = {
   furniture: [
@@ -224,7 +208,7 @@ export function isValidPlacement(
   } else {
     if (!def.canOverlapWall && gy < wallRows) return false;
     // canOverlapWall items must still have their bottom edge on the floor — can't float in the wall
-    if (def.canOverlapWall && gy + gridH <= wallRows) return false;
+    if (def.canOverlapWall && gy + gridH < wallRows) return false;
   }
 
   // Perimeter-only: must touch left edge, right edge, or bottom edge

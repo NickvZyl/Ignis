@@ -2,11 +2,15 @@ import { registry } from '../registry';
 import type { FurnitureDef } from '../types';
 
 export const def: FurnitureDef = {
-  id: 'front_door', label: 'Front Door', gridW: 3, gridH: 2,
-  spotDx: 1, spotDy: -1, canOverlapWall: false, drawKey: 'front_door',
+  id: 'front_door', label: 'Front Door', gridW: 2, gridH: 4,
+  spotDx: 1, spotDy: 1, canOverlapWall: false, drawKey: 'front_door',
   category: 'structural', tags: [],
   required: true,
   perimeterOnly: true,
+  hiResSprites: {
+    0: '/furniture/front_door-front-clean.png',
+    2: '/furniture/front_door-back-clean.png',
+  },
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number, ts: number) {

@@ -6,6 +6,7 @@ export const def: FurnitureDef = {
   spotDx: 2, spotDy: 3, canOverlapWall: false, drawKey: 'chicken_coop',
   category: 'nature', tags: ['animals'],
   scene: 'garden',
+  hiResSprites: { 0: '/furniture/chicken_coop-front-clean.png' },
 };
 
 function drawChicken(ctx: CanvasRenderingContext2D, cx: number, cy: number, ts: number, seed: number) {

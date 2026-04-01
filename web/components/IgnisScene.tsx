@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { createPortal } from 'react-dom';
+
 import { useCompanionStore } from '@web/stores/companion-store';
 import { useEnvironmentStore, getWeatherCategory } from '@web/stores/environment-store';
 import { useAuthStore } from '@web/stores/auth-store';
@@ -10,7 +10,7 @@ import { useRoomStore } from '@web/stores/room-store';
 import { useSceneStore } from '@web/stores/scene-store';
 import type { SceneId } from '@web/stores/scene-store';
 import FurnitureInventory from '@web/components/FurnitureInventory';
-import { TILE, GRID_W, GRID_H, WALL_ROWS, CEILING_ROWS, GARDEN_WALL_ROWS, BEDROOM_WALL_ROWS, FURNITURE_DEFS, getPixelPos, getSpotPixel, isValidPlacement, buildGrid, DEFAULT_LAYOUT, GARDEN_DEFAULT_LAYOUT, BEDROOM_DEFAULT_LAYOUT } from '@web/lib/room-grid';
+import { TILE, GRID_W, GRID_H, WALL_ROWS, CEILING_ROWS, GARDEN_WALL_ROWS, BEDROOM_WALL_ROWS, FURNITURE_DEFS, getPixelPos, getSpotPixel, isValidPlacement, buildGrid, DEFAULT_LAYOUT, GARDEN_DEFAULT_LAYOUT, BEDROOM_DEFAULT_LAYOUT, getSpriteSize } from '@web/lib/room-grid';
 import type { RoomLayout, CellType, PlacedFurniture } from '@web/lib/room-grid';
 import { registry, setCheckinRemaining, getRotatedDims, drawRotated, glowRotated } from '@web/lib/furniture';
 import type { FurnitureRotation } from '@web/lib/furniture';
@@ -59,18 +59,7 @@ function getFurnitureForRole(role: RoleLabel, placedIds: string[]): string {
   }
 }
 
-function getIdleFurniture(emotion: EmotionLabel, placedIds: string[]): string {
-  switch (emotion) {
-    case 'warm': case 'deep': case 'reflective':
-      return findPlacedByTag(placedIds, 'warmth', 'fireplace');
-    case 'bright': case 'eager':
-      return findPlacedByTag(placedIds, 'relaxation', 'couch');
-    case 'grounded':
-      return findPlacedByTag(placedIds, 'reading', 'bookshelf');
-    default:
-      return findPlacedByTag(placedIds, 'relaxation', 'couch');
-  }
-}
+
 
 // ── Top-down Ignis sprite (8x8, two frames) ──
 // 0=transparent 1=body 2=highlight 3=shadow 4=eye 5=closed eye (same as shadow)
@@ -542,6 +531,7 @@ const sceneBgLoading: Record<string, boolean> = {};
 // Hi-res furniture sprites — loaded on demand, cached
 const hiResSpriteCache: Record<string, HTMLImageElement | null> = {};
 const hiResSpriteLoading: Record<string, boolean> = {};
+let _onAssetLoad: (() => void) | null = null; // callback when any asset finishes loading
 
 function getHiResSprite(src: string): HTMLImageElement | null {
   if (hiResSpriteCache[src]) return hiResSpriteCache[src];
@@ -549,43 +539,18 @@ function getHiResSprite(src: string): HTMLImageElement | null {
   hiResSpriteLoading[src] = true;
   const img = new Image();
   img.src = src;
-  img.onload = () => { hiResSpriteCache[src] = img; };
+  img.onload = () => { hiResSpriteCache[src] = img; _onAssetLoad?.(); };
   return null;
 }
 
-// Asset size overrides from the asset sizer tool
-interface AssetSize { widthPx: number; heightPx: number; offsetX: number; offsetY: number; }
-let cachedAssetSizes: Record<string, AssetSize> | null = null;
-let assetSizesCacheTime = 0;
-function getAssetSizes(): Record<string, AssetSize> {
-  const now = Date.now();
-  if (cachedAssetSizes && now - assetSizesCacheTime < 5000) return cachedAssetSizes;
-  try {
-    const raw = localStorage.getItem('ignis_asset_sizes');
-    const parsed = raw ? JSON.parse(raw) : {};
-    // Purge corrupted NaN entries
-    const clean: Record<string, AssetSize> = {};
-    for (const [k, v] of Object.entries(parsed)) {
-      const s = v as AssetSize;
-      if ([s.widthPx, s.heightPx, s.offsetX, s.offsetY].every(n => typeof n === 'number' && isFinite(n))) {
-        clean[k] = s;
-      }
-    }
-    if (Object.keys(clean).length !== Object.keys(parsed).length) {
-      localStorage.setItem('ignis_asset_sizes', JSON.stringify(clean));
-    }
-    cachedAssetSizes = clean;
-  } catch { cachedAssetSizes = {}; }
-  assetSizesCacheTime = now;
-  return cachedAssetSizes!;
-}
+
 
 function loadSceneBg(scene: string, src: string) {
   if (sceneBgImages[scene] || sceneBgLoading[scene]) return;
   sceneBgLoading[scene] = true;
   const img = new Image();
   img.src = src;
-  img.onload = () => { sceneBgImages[scene] = img; };
+  img.onload = () => { sceneBgImages[scene] = img; _onAssetLoad?.(); };
 }
 
 function drawSceneBgHiRes(bgCtx: CanvasRenderingContext2D, scene: string) {
@@ -949,12 +914,15 @@ function getEntryDoor(arrivedScene: SceneId, cameFrom: SceneId): string {
 // ── Main component ──
 export default function IgnisScene() {
   const emotionalState = useCompanionStore((s) => s.emotionalState);
-  const emotion: EmotionLabel = emotionalState?.active_emotion ?? 'warm';
+  const emotion: EmotionLabel = emotionalState?.active_emotion ?? 'calm';
   const role: RoleLabel = emotionalState?.active_role ?? null;
   const userId = useAuthStore((s) => s.user?.id);
   const { weather, fetchEnvironment } = useEnvironmentStore();
   const { nextCheckinSeconds } = useChatStore();
-  const { layout, grid, mode, setMode, moveFurniture, startDrag, endDrag, dragging, draggingRot, cycleDraggingRot, getSpot, draggingSpot, startSpotDrag, endSpotDrag, setSpotEdit, initSpots, spotsLoaded, placing, placingRot, cyclePlacingRot, addToRoom, removeFromRoom, cancelPlacing, switchSceneLayout, currentScene } = useRoomStore();
+  const { layout, grid, mode, setMode, moveFurniture, startDrag, endDrag, dragging, draggingRot, cycleDraggingRot, getSpot, placing, placingRot, cyclePlacingRot, addToRoom, removeFromRoom, cancelPlacing, switchSceneLayout, currentScene, configLoaded, initConfig } = useRoomStore();
+
+  // Load furniture config (sprite sizes, grid overrides) on mount
+  useEffect(() => { initConfig(); }, [initConfig]);
   const gotoFurniture = useChatStore((s) => s.gotoFurniture);
   const { activeScene, transitioning, switchScene, ignisScene, setIgnisScene } = useSceneStore();
   const activeSceneRef = useRef(activeScene);
@@ -970,8 +938,25 @@ export default function IgnisScene() {
   const ignisSpotOrFallback = useCallback((id: string) => ignisSpot(id) || { x: 96, y: 80 }, [ignisSpot]);
   const ignisPlacedIds = useCallback(() => ignisSceneData.current.layout.furniture.map((f: PlacedFurniture) => f.id), []);
 
-  // Load spot positions from codebase on mount
-  useEffect(() => { initSpots(); }, [initSpots]);
+  // Track whether all hi-res assets have finished loading
+  const [assetsReady, setAssetsReady] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      const sceneKey = activeScene === 'garden' ? 'garden' : activeScene === 'bedroom' ? 'bedroom' : 'room';
+      if (!sceneBgImages[sceneKey]) return false;
+      for (const placed of layout.furniture) {
+        const def = FURNITURE_DEFS[placed.id];
+        if (!def?.hiResSprites) continue;
+        const src = def.hiResSprites[placed.rot ?? 0] || def.hiResSprites[0];
+        if (src && !hiResSpriteCache[src]) return false;
+      }
+      return true;
+    };
+    if (check()) { setAssetsReady(true); return; }
+    _onAssetLoad = () => { if (check()) setAssetsReady(true); };
+    return () => { _onAssetLoad = null; };
+  }, [activeScene, layout]);
+
 
   // Helper to get furniture spot pixel position (declared early for scene-change effect)
   const spot = (id: string) => getSpot(id) || { x: 96, y: 80 };
@@ -1194,8 +1179,6 @@ export default function IgnisScene() {
   const lastTargetRef = useRef({ x: -1, y: -1 });
   const saveCounterRef = useRef(0);
 
-  // Ghost drag position for spot-edit mode (pixel coords in internal resolution)
-  const ghostDragRef = useRef<{ x: number; y: number } | null>(null);
 
   // ── Autonomous scene transition state ──
   const sceneTransitionPhase = useRef<'idle' | 'walking-to-door' | 'waiting-fade'>('idle');
@@ -1302,11 +1285,11 @@ export default function IgnisScene() {
       idleTimerRef.current = setTimeout(scheduleNextIdle, randomInRange(5 * 60000, 10 * 60000));
     }
     return clearIdleTimer;
-  }, [role, scheduleNextIdle, spotsLoaded]);
+  }, [role, scheduleNextIdle, configLoaded]);
 
   // Start schedule on mount + re-target when spots load or returning from edit modes
   useEffect(() => {
-    if (!spotsLoaded || mode !== 'live') return;
+    if (!configLoaded || mode !== 'live') return;
     clearIdleTimer();
     // Always re-target — furniture or spots may have moved
     if (role !== null) {
@@ -1322,7 +1305,7 @@ export default function IgnisScene() {
       idleTimerRef.current = setTimeout(scheduleNextIdle, randomInRange(5 * 60000, 15 * 60000));
     }
     return clearIdleTimer;
-  }, [scheduleNextIdle, spotsLoaded, mode]);
+  }, [scheduleNextIdle, configLoaded, mode]);
 
   const loop = useCallback((ts: number) => {
     const scene = sceneRef.current;
@@ -1437,18 +1420,11 @@ export default function IgnisScene() {
       if (bgCtx) drawSceneBgHiRes(bgCtx, 'garden');
       ctx.clearRect(0, 0, W, H);
     } else if (isBedroom) {
-      drawBedroomFloor(ctx);
-      drawBedroomWalls(ctx);
+      loadSceneBg('bedroom', '/bedroom-bg.png');
+      if (bgCtx) drawSceneBgHiRes(bgCtx, 'bedroom');
     } else {
       loadSceneBg('room', '/room-bg.png');
-      if (bgCtx && sceneBgImages['room']) {
-        drawSceneBgHiRes(bgCtx, 'room');
-        ctx.clearRect(0, 0, W, H);
-      } else {
-        drawFloor(ctx);
-        drawWalls(ctx);
-        drawWindow(ctx, ts, sky);
-      }
+      if (bgCtx) drawSceneBgHiRes(bgCtx, 'room');
     }
     // Update clock table checkin state
     const checkinRemaining = checkinStartRef.current
@@ -1456,14 +1432,18 @@ export default function IgnisScene() {
       : null;
     setCheckinRemaining(checkinRemaining);
 
+    // Don't draw furniture until the scene background has loaded
+    const sceneBgKey = isGarden ? 'garden' : isBedroom ? 'bedroom' : 'room';
+    const bgLoaded = !!sceneBgImages[sceneBgKey];
+
     // Draw all placed furniture via registry (sorted by bottom edge for z-order)
-    const sorted = [...layout.furniture].sort((a, b) => {
+    const sorted = bgLoaded ? [...layout.furniture].sort((a, b) => {
       const aDef = FURNITURE_DEFS[a.id];
       const bDef = FURNITURE_DEFS[b.id];
       const aH = aDef ? getRotatedDims(aDef, a.rot ?? 0).gridH : 0;
       const bH = bDef ? getRotatedDims(bDef, b.rot ?? 0).gridH : 0;
       return (a.gy + aH) - (b.gy + bH);
-    });
+    }) : [];
     for (const placed of sorted) {
       const def = FURNITURE_DEFS[placed.id];
       if (!def) continue;
@@ -1476,8 +1456,7 @@ export default function IgnisScene() {
         if (spriteSrc) {
           const img = getHiResSprite(spriteSrc);
           if (img) {
-            const assetSizes = getAssetSizes();
-            const saved = assetSizes[def.id];
+            const saved = getSpriteSize(def.id, rot);
             const dims = getRotatedDims(def, rot);
             const gridW = dims.gridW * TILE * SCALE;
             const gridH = dims.gridH * TILE * SCALE;
@@ -1507,9 +1486,7 @@ export default function IgnisScene() {
         }
       }
 
-      // Fallback: procedural draw on scene canvas
-      const drawFn = registry.getDraw(def.drawKey);
-      if (drawFn) drawRotated(ctx, drawFn, p.x, p.y, ts, def, rot);
+      // Hi-res sprite not loaded yet — skip (will appear once loaded)
     }
 
     // Edit mode: zone tints + grid overlay + drag ghost
@@ -1619,72 +1596,6 @@ export default function IgnisScene() {
       ctx.globalAlpha = 1;
     }
 
-    // Spot-edit mode: draw ghost Ignis at each furniture spot
-    if (mode === 'spot-edit') {
-      // Grid overlay
-      ctx.globalAlpha = 0.1;
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 0.3;
-      for (let gxi = 0; gxi <= GRID_W; gxi++) {
-        ctx.beginPath(); ctx.moveTo(gxi*TILE, 0); ctx.lineTo(gxi*TILE, H); ctx.stroke();
-      }
-      for (let gyi = 0; gyi <= GRID_H; gyi++) {
-        ctx.beginPath(); ctx.moveTo(0, gyi*TILE); ctx.lineTo(W, gyi*TILE); ctx.stroke();
-      }
-
-      for (const placed of layout.furniture) {
-        const def = FURNITURE_DEFS[placed.id];
-        if (!def) continue;
-
-        // Highlight furniture bounds
-        ctx.fillStyle = '#4A90D9';
-        ctx.globalAlpha = 0.12;
-        ctx.fillRect(placed.gx*TILE, placed.gy*TILE, def.gridW*TILE, def.gridH*TILE);
-        ctx.globalAlpha = 0.4;
-        ctx.strokeStyle = '#4A90D9';
-        ctx.strokeRect(placed.gx*TILE+0.5, placed.gy*TILE+0.5, def.gridW*TILE-1, def.gridH*TILE-1);
-
-        // Draw ghost Ignis at spot position
-        const sp = getSpot(placed.id);
-        if (!sp) continue;
-
-        const isBeingDragged = draggingSpot === placed.id;
-        const ghostX = isBeingDragged && ghostDragRef.current ? ghostDragRef.current.x : sp.x;
-        const ghostY = isBeingDragged && ghostDragRef.current ? ghostDragRef.current.y : sp.y;
-
-        // Ghost shadow
-        ctx.globalAlpha = 0.15;
-        ctx.fillStyle = '#1a0808';
-        ctx.fillRect(Math.round(ghostX)-1, Math.round(ghostY)+7, 10, 2);
-
-        // Ghost Ignis (semi-transparent)
-        ctx.globalAlpha = isBeingDragged ? 0.9 : 0.5;
-        drawSprite(ctx, IGNIS_FRAMES[0], ghostX, ghostY, isBeingDragged ? '#F5D03B' : emotionColor);
-        ctx.globalAlpha = 1;
-
-        // Furniture label above ghost
-        ctx.globalAlpha = isBeingDragged ? 1 : 0.7;
-        ctx.fillStyle = isBeingDragged ? '#F5D03B' : '#fff';
-        ctx.font = '3px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(def.label.toUpperCase(), ghostX + 4, ghostY - 2);
-        ctx.globalAlpha = 1;
-
-        // Connector line from furniture center to spot
-        const furCenterX = placed.gx * TILE + (def.gridW * TILE) / 2;
-        const furCenterY = placed.gy * TILE + (def.gridH * TILE) / 2;
-        ctx.strokeStyle = isBeingDragged ? '#F5D03B' : 'rgba(255,255,255,0.3)';
-        ctx.lineWidth = 0.5;
-        ctx.setLineDash([1, 1]);
-        ctx.beginPath();
-        ctx.moveTo(furCenterX, furCenterY);
-        ctx.lineTo(ghostX + 4, ghostY + 4);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-      ctx.globalAlpha = 1;
-    }
-
     // Garden outdoor rain (full canvas)
     if (isGarden && sky.rain) {
       ctx.globalAlpha = 0.35;
@@ -1699,9 +1610,9 @@ export default function IgnisScene() {
       ctx.globalAlpha = 1;
     }
 
-    // Shadow + Ignis (only when Ignis is in this scene, hidden in spot-edit mode)
+    // Shadow + Ignis (only when Ignis is in this scene)
     const ignisVisible = ignisSceneRef.current === activeSceneRef.current;
-    if (mode !== 'spot-edit' && ignisVisible) {
+    if (ignisVisible) {
       ctx.globalAlpha = 0.2; ctx.fillStyle = '#1a0808';
       ctx.fillRect(Math.round(pos.x)-1, Math.round(pos.y)+7, 10, 2);
       ctx.globalAlpha = 1;
@@ -1766,7 +1677,7 @@ export default function IgnisScene() {
     }
 
     animRef.current = requestAnimationFrame(loop);
-  }, [emotion, role, weather, layout, grid, mode, dragging, draggingRot, draggingSpot, placing, placingRot, getSpot]);
+  }, [emotion, role, weather, layout, grid, mode, dragging, draggingRot, placing, placingRot, getSpot]);
 
   useEffect(() => {
     animRef.current = requestAnimationFrame(loop);
@@ -1794,8 +1705,6 @@ export default function IgnisScene() {
   // Refs to track drag IDs so mouse handlers always see current value
   const draggingRef = useRef<string | null>(null);
   useEffect(() => { draggingRef.current = dragging; }, [dragging]);
-  const draggingSpotRef = useRef<string | null>(null);
-  useEffect(() => { draggingSpotRef.current = draggingSpot; }, [draggingSpot]);
 
   // Ghost position for furniture drag (grid coords)
   const furnitureDragRef = useRef<{ gx: number; gy: number } | null>(null);
@@ -1809,7 +1718,7 @@ export default function IgnisScene() {
   const draggingRotRef = useRef<FurnitureRotation>(0);
   useEffect(() => { draggingRotRef.current = draggingRot; }, [draggingRot]);
 
-  // Unified mouse down — handles edit, spot-edit, live door clicks, and inventory placement
+  // Unified mouse down — handles edit, live door clicks, and inventory placement
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { px, py, gx, gy } = mouseToPixel(e);
 
@@ -1873,26 +1782,7 @@ export default function IgnisScene() {
       }
     }
 
-    if (mode === 'spot-edit') {
-      let closest: { id: string; dist: number } | null = null;
-      for (const placed of layout.furniture) {
-        const sp = getSpot(placed.id);
-        if (!sp) continue;
-        const dx = px - (sp.x + 4);
-        const dy = py - (sp.y + 4);
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist < 12 && (!closest || dist < closest.dist)) {
-          closest = { id: placed.id, dist };
-        }
-      }
-      if (closest) {
-        const sp = getSpot(closest.id)!;
-        startSpotDrag(closest.id);
-        ghostDragRef.current = { x: sp.x, y: sp.y };
-        e.preventDefault();
-      }
-    }
-  }, [mode, layout, getSpot, startDrag, startSpotDrag, addToRoom, removeFromRoom, mouseToPixel, switchScene]);
+  }, [mode, layout, getSpot, startDrag, addToRoom, removeFromRoom, mouseToPixel, switchScene]);
 
   // Unified mouse move
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1921,9 +1811,6 @@ export default function IgnisScene() {
       }
     }
 
-    if (mode === 'spot-edit' && draggingSpotRef.current) {
-      ghostDragRef.current = { x: px - 4, y: py - 4 };
-    }
   }, [mode, mouseToPixel]);
 
   // Unified mouse up
@@ -1937,18 +1824,7 @@ export default function IgnisScene() {
       endDrag();
     }
 
-    if (mode === 'spot-edit' && draggingSpotRef.current) {
-      const dragId = draggingSpotRef.current;
-      const placed = layout.furniture.find(f => f.id === dragId);
-      if (placed) {
-        const spotDx = (px - 4) / TILE - placed.gx;
-        const spotDy = (py - 4) / TILE - placed.gy;
-        setSpotEdit(dragId, spotDx, spotDy);
-      }
-      ghostDragRef.current = null;
-      endSpotDrag();
-    }
-  }, [mode, layout, moveFurniture, endDrag, setSpotEdit, endSpotDrag, mouseToPixel]);
+  }, [mode, layout, moveFurniture, endDrag, mouseToPixel]);
 
   // R key to cycle rotation while dragging or placing
   useEffect(() => {
@@ -1965,58 +1841,10 @@ export default function IgnisScene() {
   }, [mode, placing, dragging, cyclePlacingRot, cycleDraggingRot]);
 
   const menuFont = "'Press Start 2P', monospace";
-  const [devModal, setDevModal] = useState<string | null>(null);
 
   return (
     <div className="flex flex-col items-center">
       <div className="flex gap-0">
-      {/* Left-side menu */}
-      <div className="flex flex-col gap-1 py-1 pr-2" style={{ fontFamily: menuFont }}>
-        <button
-          onClick={() => setMode(mode === 'edit' ? 'live' : 'edit')}
-          className="px-2 py-1.5 rounded text-[8px] tracking-wider text-left"
-          style={{
-            background: mode === 'edit' ? '#F5D03B' : 'rgba(255,255,255,0.06)',
-            color: mode === 'edit' ? '#1a0e08' : '#a0a0a0',
-            border: 'none',
-          }}
-        >
-          {mode === 'edit' ? '✓ EDIT' : 'EDIT'}
-        </button>
-        <button
-          onClick={() => setMode(mode === 'spot-edit' ? 'live' : 'spot-edit')}
-          className="px-2 py-1.5 rounded text-[8px] tracking-wider text-left"
-          style={{
-            background: mode === 'spot-edit' ? '#06B6D4' : 'rgba(255,255,255,0.06)',
-            color: mode === 'spot-edit' ? '#1a0e08' : '#a0a0a0',
-            border: 'none',
-          }}
-        >
-          {mode === 'spot-edit' ? '✓ SPOTS' : 'SPOTS'}
-        </button>
-        <div className="my-1" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
-        {[
-          { label: 'PIXEL', href: '/dev/editor', color: '#06B6D4' },
-          { label: 'GALLERY', href: '/dev/gallery', color: '#F59E0B' },
-          { label: 'RESIZE', href: '/dev/resize', color: '#d070d0' },
-          { label: 'ZONES', href: '/dev/zones', color: '#e06080' },
-          { label: 'SCHED', href: '/dev/schedule', color: '#a0e0a0' },
-        ].map(({ label, href, color }) => (
-          <button
-            key={label}
-            onClick={() => setDevModal(devModal === href ? null : href)}
-            className="px-2 py-1.5 rounded text-[8px] tracking-wider text-left"
-            style={{
-              fontFamily: menuFont,
-              background: devModal === href ? color : 'rgba(255,255,255,0.06)',
-              color: devModal === href ? '#1a0e08' : color,
-              border: 'none', cursor: 'pointer',
-            }}
-          >
-            {devModal === href ? '✓ ' : ''}{label}
-          </button>
-        ))}
-      </div>
       {/* Scene canvas */}
       <div className="relative" style={{ width: W*SCALE, height: H*SCALE }}>
         {/* Hi-res background layer — smooth scaling, no pixelation */}
@@ -2035,9 +1863,7 @@ export default function IgnisScene() {
           onContextMenu={(e) => mode === 'edit' && e.preventDefault()}
           style={{
             width: W*SCALE, height: H*SCALE, imageRendering: 'pixelated',
-            cursor: mode === 'edit' ? (dragging ? 'grabbing' : 'grab')
-              : mode === 'spot-edit' ? (draggingSpot ? 'grabbing' : 'grab')
-              : 'default',
+            cursor: mode === 'edit' ? (dragging ? 'grabbing' : 'grab') : 'default',
           }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
@@ -2050,6 +1876,18 @@ export default function IgnisScene() {
           height={H*SCALE}
           className="absolute pointer-events-none"
         />
+        {/* Loading spinner while hi-res assets load */}
+        {!assetsReady && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ background: '#1a0e08', zIndex: 15 }}>
+            <div style={{
+              width: 24, height: 24,
+              border: '3px solid rgba(245,208,59,0.2)',
+              borderTopColor: '#F5D03B',
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite',
+            }} />
+          </div>
+        )}
         {/* Scene transition fade overlay */}
         <div
           className="absolute inset-0 pointer-events-none"
@@ -2081,66 +1919,9 @@ export default function IgnisScene() {
             </button>
           </div>
         )}
-        {mode === 'spot-edit' && draggingSpot && (
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 rounded text-[8px] tracking-wider"
-            style={{ fontFamily: menuFont, background: 'rgba(0,0,0,0.7)', color: '#06B6D4' }}>
-            DRAG TO SET {FURNITURE_DEFS[draggingSpot]?.label.toUpperCase()} SPOT
-          </div>
-        )}
-        {mode === 'spot-edit' && !draggingSpot && (
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-2 items-center">
-            <div className="px-3 py-1 rounded text-[8px] tracking-wider"
-              style={{ fontFamily: menuFont, background: 'rgba(0,0,0,0.7)', color: '#888' }}>
-              DRAG GHOST IGNIS TO REPOSITION
-            </div>
-            <button
-              onClick={() => setMode('live')}
-              className="px-3 py-1 rounded text-[8px] tracking-wider"
-              style={{ fontFamily: menuFont, background: '#06B6D4', color: '#1a0e08', border: 'none', cursor: 'pointer' }}>
-              SAVE &amp; DONE
-            </button>
-          </div>
-        )}
       </div>
       <FurnitureInventory />
       </div>
-      <div className="flex gap-5 items-center py-1.5 text-[10px] tracking-widest" style={{ fontFamily: menuFont }}>
-        <span style={{ color: EMOTION_COLORS[emotion] }}>● {emotion.toUpperCase()}</span>
-        {role && <span style={{ color: ROLE_COLORS[role], opacity: 0.55 }}>▪ {role.toUpperCase()}</span>}
-      </div>
-      {/* Dev tool modal — portaled to body to escape CSS transform */}
-      {devModal && typeof document !== 'undefined' && createPortal(
-        <div
-          style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
-          onKeyDown={(e) => { if (e.key === 'Escape') setDevModal(null); }}
-          tabIndex={-1}
-          ref={(el) => el?.focus()}
-        >
-          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)' }} onClick={() => setDevModal(null)} />
-          <div style={{ position: 'relative', zIndex: 2, width: '90vw', maxWidth: 1200, display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
-            <button
-              onClick={() => setDevModal(null)}
-              style={{
-                fontFamily: menuFont, fontSize: 10, padding: '6px 14px',
-                borderRadius: 6, border: 'none', cursor: 'pointer',
-                background: '#e04040', color: '#fff',
-              }}
-            >
-              ✕ CLOSE
-            </button>
-          </div>
-          <iframe
-            src={devModal}
-            style={{
-              position: 'relative', zIndex: 1,
-              width: '95vw', height: '90vh', maxWidth: 1400,
-              borderRadius: 12, border: 'none',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
-            }}
-          />
-        </div>,
-        document.body
-      )}
     </div>
   );
 }

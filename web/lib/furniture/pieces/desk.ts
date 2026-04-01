@@ -1,10 +1,37 @@
 import { registry } from '../registry';
 import type { FurnitureDef } from '../types';
 
+function animateDesk(
+  ctx: CanvasRenderingContext2D, dx: number, dy: number, dw: number, dh: number, ts: number, rot: number,
+) {
+  if (rot !== 0) return;
+  // Monitor screen glow
+  const flick = Math.sin(ts * 0.003) * 0.04 + 0.12;
+  const cx = dx + dw * 0.40, cy = dy + dh * 0.22, rx = dw * 0.08, ry = dh * 0.08;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(rx, ry) * 2);
+  g.addColorStop(0, `rgba(80,160,200,${flick})`);
+  g.addColorStop(0.5, `rgba(60,140,180,${flick * 0.3})`);
+  g.addColorStop(1, 'rgba(60,120,160,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(cx - rx * 2, cy - ry * 2, rx * 4, ry * 4);
+
+  // Desk lamp warm glow
+  const lampPulse = Math.sin(ts * 0.0025) * 0.06 + 0.2;
+  const lx = dx + dw * 0.72, ly = dy + dh * 0.15, lr = dw * 0.06;
+  const lg = ctx.createRadialGradient(lx, ly, 0, lx, ly, lr * 3);
+  lg.addColorStop(0, `rgba(255,200,120,${lampPulse})`);
+  lg.addColorStop(0.5, `rgba(255,180,100,${lampPulse * 0.3})`);
+  lg.addColorStop(1, 'rgba(255,160,80,0)');
+  ctx.fillStyle = lg;
+  ctx.fillRect(lx - lr * 3, ly - lr * 3, lr * 6, lr * 6);
+}
+
 export const def: FurnitureDef = {
   id: 'desk', label: 'Desk', gridW: 5, gridH: 5,
-  spotDx: 2, spotDy: 5, canOverlapWall: false, drawKey: 'desk',
+  spotDx: 2, spotDy: 5, canOverlapWall: true, drawKey: 'desk',
   category: 'surface', tags: ['work'],
+  hiResSprites: { 0: '/furniture/desk-front-clean.png' },
+  hiResAnimate: animateDesk,
 };
 
 export function draw(ctx: CanvasRenderingContext2D, x: number, y: number, ts: number) {
