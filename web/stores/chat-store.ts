@@ -472,12 +472,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       .single();
 
     if (existing) {
-      // Load its messages
+      // Load recent messages (last 200 — Supabase default limit is 1000 but we don't need all)
       const { data: msgs } = await supabase
         .from('messages')
         .select('*')
         .eq('conversation_id', existing.id)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: false })
+        .limit(200);
+      // Reverse to chronological order
+      if (msgs) msgs.reverse();
 
       set({
         conversationId: existing.id,
