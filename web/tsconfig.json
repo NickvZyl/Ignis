@@ -32,7 +32,11 @@
     }
   },
   "include": [
-    "../src/**/*.ts",
+    "../src/constants/**/*.ts",
+    "../src/lib/emotional-engine.ts",
+    "../src/lib/reflection-engine.ts",
+    "../src/prompts/**/*.ts",
+    "../src/types/**/*.ts",
     "./**/*.ts",
     "./**/*.tsx",
     "next-env.d.ts",
