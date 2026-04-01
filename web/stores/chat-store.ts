@@ -11,6 +11,11 @@ import type { Message, Memory, ChatCompletionMessage, SelfMemory } from '@/types
 const STREAMING_ID = '__streaming__';
 const MEMORY_FALLBACK_INTERVAL = 4; // extract every N exchanges if nothing triggered
 
+function formatMessageForApi(m: Message): ChatCompletionMessage {
+  const ts = new Date(m.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  return { role: m.role as 'user' | 'assistant', content: `[${ts}] ${m.content}` };
+}
+
 function getScheduleContext(messages?: Message[]): ScheduleContext {
   const schedule = loadSchedule();
   const block = schedule[getCurrentSlot()];
@@ -540,12 +545,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           .filter((m) => m.role !== 'assistant' || m.content.trim())
           .slice(-20)
           .map((m) => {
-            let msgContent = m.content;
+            const ts = new Date(m.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            let msgContent = `[${ts}] ${m.content}`;
             // If this message is a reply, prepend the context
             if (m.reply_to_id) {
               const replyTarget = updatedMessages.find((r) => r.id === m.reply_to_id);
               if (replyTarget) {
-                msgContent = `[Replying to ${replyTarget.role === 'user' ? 'their own' : 'your'} message: "${replyTarget.content.slice(0, 150)}"]\n${m.content}`;
+                msgContent = `[${ts}] [Replying to ${replyTarget.role === 'user' ? 'their own' : 'your'} message: "${replyTarget.content.slice(0, 150)}"]\n${m.content}`;
               }
             }
             return { role: m.role as 'user' | 'assistant', content: msgContent };
@@ -926,10 +932,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const apiMessages: ChatCompletionMessage[] = [
         { role: 'system', content: systemPrompt + "\n\n## Right now\n" + greetingContext },
-        ...get().messages.filter((m) => m.role !== 'assistant' || m.content.trim()).slice(-20).map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        })),
+        ...get().messages.filter((m) => m.role !== 'assistant' || m.content.trim()).slice(-20).map(formatMessageForApi),
         { role: 'user' as const, content: '[They just opened the app after ' + Math.round(hoursSince) + ' hours away. Greet them.]' },
       ];
 
@@ -1058,10 +1061,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const apiMessages: ChatCompletionMessage[] = [
         { role: 'system', content: systemPrompt + `\n\n## Right now\n${checkinContext}` },
-        ...messages.filter((m) => m.role !== 'assistant' || m.content.trim()).slice(-20).map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        })),
+        ...messages.filter((m) => m.role !== 'assistant' || m.content.trim()).slice(-20).map(formatMessageForApi),
         { role: 'user' as const, content: `[${nextCheckinReason ? `They said: "${nextCheckinReason}" — that should be done now. Follow up.` : 'Been quiet for a bit. Check in naturally.'}]` },
       ];
 
@@ -1174,10 +1174,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const apiMessages: ChatCompletionMessage[] = [
         { role: 'system', content: systemPrompt },
-        ...messages.filter((m) => m.role !== 'assistant' || m.content.trim()).slice(-20).map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        })),
+        ...messages.filter((m) => m.role !== 'assistant' || m.content.trim()).slice(-20).map(formatMessageForApi),
         { role: 'user' as const, content: `[Igni is following up on: ${context}]` },
       ];
 
@@ -1297,10 +1294,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       const apiMessages: ChatCompletionMessage[] = [
         { role: 'system', content: systemPrompt + `\n\n## Right now\nYou just had this thought: "${thought}". Share it naturally with your person — bring it up casually, like mentioning something you noticed or were thinking about. One short message. Don't quote it verbatim, paraphrase it in your own voice.` },
-        ...messages.filter((m) => m.role !== 'assistant' || m.content.trim()).slice(-20).map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.content,
-        })),
+        ...messages.filter((m) => m.role !== 'assistant' || m.content.trim()).slice(-20).map(formatMessageForApi),
         { role: 'user' as const, content: `[Igni is sharing a thought she had on her own.]` },
       ];
 
