@@ -12,7 +12,8 @@ const STREAMING_ID = '__streaming__';
 const MEMORY_FALLBACK_INTERVAL = 4; // extract every N exchanges if nothing triggered
 
 function formatMessageForApi(m: Message): ChatCompletionMessage {
-  const ts = new Date(m.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  const d = new Date(m.created_at);
+  const ts = d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
   return { role: m.role as 'user' | 'assistant', content: `[${ts}] ${m.content}` };
 }
 
