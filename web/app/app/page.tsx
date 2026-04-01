@@ -103,23 +103,27 @@ export default function Home() {
   useEffect(() => {
     if (!userId) return;
     const init = async () => {
-      await syncFromCloud();
-      await syncScheduleFromCloud();
-      await loadState(userId);
+      // Phase 1: All independent data fetches in parallel
+      await Promise.all([
+        syncFromCloud(),
+        syncScheduleFromCloud(),
+        loadState(userId),
+        useActivityStore.getState().loadToday(userId),
+        useReflectionStore.getState().loadSelfMemories(userId),
+      ]);
 
-      // Compute absence before applySessionStart resets last_interaction_at
+      // Phase 2: Depends on loadState completing (emotional state needed)
       const es = useCompanionStore.getState().emotionalState;
       const hoursSince = es
         ? (Date.now() - new Date(es.last_interaction_at).getTime()) / (1000 * 60 * 60)
         : 0;
 
-      await applySessionStart();
-      await startConversation(userId);
-      // Initialize activity & reflection stores
-      await useActivityStore.getState().loadToday(userId);
-      await useReflectionStore.getState().loadSelfMemories(userId);
+      await Promise.all([
+        applySessionStart(),
+        startConversation(userId),
+      ]);
 
-      // Auto-greet after significant absence (>2h) — Igni speaks first
+      // Phase 3: Auto-greet if returning after absence
       if (hoursSince >= 2) {
         const schedule = loadSchedule();
         const isSleeping = schedule[getCurrentSlot()].label === 'sleeping';
