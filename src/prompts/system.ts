@@ -160,7 +160,7 @@ export function buildSystemPrompt(
 
   // ── Memories (already filtered by vector search — just list them) ──
   if (memories.length > 0) {
-    parts.push(`You remember: ${memories.map((m) => m.content).join('. ')}. Reference naturally when relevant.`);
+    parts.push(`You remember about the person you're talking to: ${memories.map((m) => m.content).join('. ')}. "User" and any name mentioned in these memories refer to THIS person — the one messaging you right now. Reference naturally when relevant.`);
   }
 
   // ── Self-memories (max 3, compact) ──
