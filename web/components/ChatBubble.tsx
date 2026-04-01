@@ -44,6 +44,16 @@ interface Props {
   allMessages: Message[];
 }
 
+// Strip all internal tags that should never be visible to the user
+function stripInternalTags(text: string): string {
+  return text
+    .replace(/\s*\[CHECKIN:\d+:[^\]]*\]\s*/g, '')
+    .replace(/\s*\[GOTO:\w+\]\s*/g, '')
+    .replace(/\s*\[FOLLOWUP:\d+:[^\]]*\]\s*/g, '')
+    .replace(/\s*\[SCHEDULE_UPDATE:\[[\s\S]*?\]\]\s*/g, '')
+    .trim();
+}
+
 export default function ChatBubble({ message, prevMessage, onReply, allMessages }: Props) {
   const isUser = message.role === 'user';
   const streamingId = useChatStore((s) => s.streamingMessageId);
@@ -206,7 +216,7 @@ export default function ChatBubble({ message, prevMessage, onReply, allMessages 
                 onClick={() => window.open(message.image_url!, '_blank')}
               />
             )}
-            {message.content}
+            {isUser ? message.content : stripInternalTags(message.content)}
             {isStreaming && (
               <span className="text-text-secondary" style={{ animation: 'blink 0.8s step-end infinite' }}>
                 &#x258C;

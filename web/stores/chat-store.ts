@@ -1189,6 +1189,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
 
+      // Strip internal tags before persisting
+      fullText = fullText.replace(/\s*\[GOTO:\w+\]\s*/g, '').replace(/\s*\[CHECKIN:\d+:[^\]]*\]\s*/g, '').replace(/\s*\[FOLLOWUP:\d+:[^\]]*\]\s*/g, '').replace(/\s*\[SCHEDULE_UPDATE:\[[\s\S]*?\]\]\s*/g, '').trim();
+
       // Persist
       const { data: assistantMsg, error: assistantError } = await supabase
         .from('messages')
