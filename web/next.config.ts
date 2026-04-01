@@ -2,7 +2,7 @@ import type { NextConfig } from 'next';
 import path from 'path';
 
 const nextConfig: NextConfig = {
-  ...(process.env.BUILD_MODE === 'mobile' ? { output: 'export' } : {}),
+  output: process.env.BUILD_MODE === 'mobile' ? 'export' : 'standalone',
   webpack: (config) => {
     config.resolve.alias['@'] = path.resolve(__dirname, '../src');
     config.resolve.alias['@web'] = path.resolve(__dirname, './');

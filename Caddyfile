@@ -1,0 +1,7 @@
+meetigni.com {
+    reverse_proxy ignis:3000
+}
+
+www.meetigni.com {
+    redir https://meetigni.com{uri} permanent
+}
