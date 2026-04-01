@@ -584,9 +584,14 @@ export async function POST(req: NextRequest) {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      console.error('[Chat API] round', round, 'failed:', response.status, error);
-      return new Response(error, { status: response.status });
+      const errorText = await response.text();
+      console.error('[Chat API] round', round, 'failed:', response.status, errorText);
+      let userMessage = 'Something went wrong talking to the AI.';
+      if (response.status === 401) userMessage = 'AI service authentication failed — the API key may be invalid or expired.';
+      else if (response.status === 402) userMessage = 'AI service credits exhausted — please top up your OpenRouter account.';
+      else if (response.status === 429) userMessage = 'Too many requests — please wait a moment and try again.';
+      else if (response.status >= 500) userMessage = 'AI service is temporarily down — try again in a minute.';
+      return Response.json({ error: userMessage }, { status: response.status });
     }
 
     const data = await response.json();

@@ -409,8 +409,14 @@ async function apiChat(messages: ChatCompletionMessage[], stream: boolean = true
     body: JSON.stringify({ messages, stream, userId, accessToken }),
   });
   if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Chat API error (${res.status}): ${error}`);
+    let message = `Chat API error (${res.status})`;
+    try {
+      const body = await res.json();
+      message = body.error || message;
+    } catch {
+      message = await res.text() || message;
+    }
+    throw new Error(message);
   }
   return res;
 }

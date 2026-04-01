@@ -381,6 +381,15 @@ export default function Home() {
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Error banner */}
+      {error && (
+        <div className="px-4 py-2 bg-red-900/80 text-red-200 text-xs flex items-center justify-between gap-2"
+          style={{ fontFamily: "'Press Start 2P', monospace", fontSize: '7px', lineHeight: '1.6' }}>
+          <span>{error}</span>
+          <button onClick={() => useChatStore.setState({ error: null })} className="text-red-400 hover:text-white shrink-0">✕</button>
+        </div>
+      )}
+
       {/* Input */}
       <ChatInput
         onSend={handleSend}
