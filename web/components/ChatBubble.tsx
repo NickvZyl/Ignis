@@ -197,6 +197,15 @@ export default function ChatBubble({ message, prevMessage, onReply, allMessages 
             }`}
             style={!isUser ? { borderLeft: `2px solid ${emotionColor}` } : undefined}
           >
+            {message.image_url && (
+              <img
+                src={message.image_url}
+                alt="Shared image"
+                className="max-w-full rounded-lg mb-2 cursor-pointer"
+                style={{ maxHeight: '240px', objectFit: 'contain' }}
+                onClick={() => window.open(message.image_url!, '_blank')}
+              />
+            )}
             {message.content}
             {isStreaming && (
               <span className="text-text-secondary" style={{ animation: 'blink 0.8s step-end infinite' }}>

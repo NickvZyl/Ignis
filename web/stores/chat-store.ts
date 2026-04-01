@@ -386,21 +386,19 @@ interface SessionContextCache {
   userName: string | null;
   selfKnowledge: Array<{ category: string; key: string; content: string; source: string }>;
   activityHistory: Array<{ scene: string; furniture: string; activity_label: string; emotion: string; started_at: string }>;
-  recentChanges: Array<{ summary: string; details: string | null; created_at: string }>;
 }
 let sessionContextCache: SessionContextCache | null = null;
 
 async function getOrLoadSessionContext(userId: string, conversationId: string | null): Promise<SessionContextCache> {
   if (sessionContextCache) return sessionContextCache;
 
-  const [userName, selfKnowledge, activityHistory, recentChanges] = await Promise.all([
+  const [userName, selfKnowledge, activityHistory] = await Promise.all([
     loadUserProfile(userId),
     loadSelfKnowledge(userId),
     loadActivityHistory(userId),
-    loadRecentChanges(),
   ]);
 
-  sessionContextCache = { userName, selfKnowledge, activityHistory, recentChanges };
+  sessionContextCache = { userName, selfKnowledge, activityHistory };
   return sessionContextCache;
 }
 
@@ -416,7 +414,7 @@ interface ChatState {
   currentLocation: string | null; // furniture id Ignis is currently at/near
 
   startConversation: (userId: string) => Promise<void>;
-  sendMessage: (content: string, userId: string, replyToId?: string) => Promise<void>;
+  sendMessage: (content: string, userId: string, replyToId?: string, imageFile?: File) => Promise<void>;
   sendReturnGreeting: (userId: string, hoursSince: number) => Promise<void>;
   sendProactiveMessage: (userId: string) => Promise<void>;
   sendReflectionMessage: (userId: string, thought: string) => Promise<void>;
@@ -502,7 +500,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     console.log('[Chat] created new conversation', data.id);
   },
 
-  sendMessage: async (content: string, userId: string, replyToId?: string) => {
+  sendMessage: async (content: string, userId: string, replyToId?: string, imageFile?: File) => {
     const { conversationId, messages } = get();
     if (!conversationId || get().isGenerating) return;
 
@@ -512,10 +510,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isGenerating: true, error: null });
 
     try {
+      // 0. Upload image if provided
+      let imageUrl: string | null = null;
+      let imageBase64: string | null = null;
+      if (imageFile) {
+        const ext = imageFile.name.split('.').pop() || 'jpg';
+        const path = `${userId}/${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('chat-images')
+          .upload(path, imageFile, { contentType: imageFile.type });
+        if (uploadError) {
+          console.error('[Image] upload failed:', uploadError);
+        } else {
+          const { data: urlData } = supabase.storage.from('chat-images').getPublicUrl(path);
+          imageUrl = urlData.publicUrl;
+          // Also get base64 for the LLM call
+          const buffer = await imageFile.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          imageBase64 = `data:${imageFile.type};base64,${btoa(binary)}`;
+        }
+      }
+
       // 1. Persist user message
       const { data: userMsg, error: userError } = await supabase
         .from('messages')
-        .insert({ conversation_id: conversationId, role: 'user', content, ...(replyToId ? { reply_to_id: replyToId } : {}) })
+        .insert({ conversation_id: conversationId, role: 'user', content, image_url: imageUrl, ...(replyToId ? { reply_to_id: replyToId } : {}) })
         .select()
         .single();
 
@@ -572,13 +595,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
           .map((m) => {
             const ts = new Date(m.created_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
             let msgContent = `[${ts}] ${m.content}`;
-            // If this message is a reply, prepend the context
             if (m.reply_to_id) {
               const replyTarget = updatedMessages.find((r) => r.id === m.reply_to_id);
               if (replyTarget) {
                 msgContent = `[${ts}] [Replying to ${replyTarget.role === 'user' ? 'their own' : 'your'} message: "${replyTarget.content.slice(0, 150)}"]\n${m.content}`;
               }
             }
+
+            // For image messages: use multimodal content blocks
+            const isCurrentMsg = m.id === userMsg.id;
+            const imgSrc = isCurrentMsg ? imageBase64 : m.image_url;
+            if (imgSrc && m.role === 'user') {
+              return {
+                role: 'user' as const,
+                content: [
+                  { type: 'text' as const, text: msgContent },
+                  { type: 'image_url' as const, image_url: { url: imgSrc } },
+                ],
+              };
+            }
+
             return { role: m.role as 'user' | 'assistant', content: msgContent };
           }),
       ];
@@ -590,6 +626,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         conversation_id: conversationId,
         role: 'assistant',
         content: '',
+        image_url: null,
         emotional_signals: null,
         created_at: new Date().toISOString(),
       };
@@ -967,6 +1004,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         conversation_id: conversationId,
         role: 'assistant',
         content: '',
+        image_url: null,
         emotional_signals: null,
         created_at: new Date().toISOString(),
       };
@@ -1099,6 +1137,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         conversation_id: conversationId,
         role: 'assistant',
         content: '',
+        image_url: null,
         emotional_signals: null,
         created_at: new Date().toISOString(),
       };
@@ -1213,6 +1252,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         conversation_id: conversationId,
         role: 'assistant',
         content: '',
+        image_url: null,
         emotional_signals: null,
         created_at: new Date().toISOString(),
       };
@@ -1335,6 +1375,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         conversation_id: conversationId,
         role: 'assistant',
         content: '',
+        image_url: null,
         emotional_signals: null,
         created_at: new Date().toISOString(),
       };
@@ -1629,10 +1670,11 @@ function computeEmotionalSignals(messages: Message[]): { recentDepth: number; re
 }
 
 async function loadEnrichedContext(userId: string, conversationId: string | null, messages: Message[]): Promise<EnrichedContext> {
-  // Use session cache for static data, only fetch dynamic data (conversation summaries)
-  const [cached, conversationSummaries] = await Promise.all([
+  // Use session cache for static data, fetch dynamic data fresh
+  const [cached, conversationSummaries, recentChanges] = await Promise.all([
     getOrLoadSessionContext(userId, conversationId),
     loadConversationSummaries(userId, conversationId),
+    loadRecentChanges(),
   ]);
 
   return {
@@ -1640,6 +1682,6 @@ async function loadEnrichedContext(userId: string, conversationId: string | null
     conversationSummaries,
     activityHistory: cached.activityHistory,
     emotionalSignals: computeEmotionalSignals(messages),
-    recentChanges: cached.recentChanges,
+    recentChanges,
   };
 }

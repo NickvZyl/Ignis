@@ -42,6 +42,7 @@ export interface Message {
   conversation_id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  image_url: string | null;
   emotional_signals: EmotionalSignals | null;
   created_at: string;
   reply_to_id?: string | null;
@@ -80,9 +81,14 @@ export interface Profile {
   created_at: string;
 }
 
+export type ChatCompletionContent = string | Array<
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+>;
+
 export interface ChatCompletionMessage {
   role: 'system' | 'user' | 'assistant';
-  content: string;
+  content: ChatCompletionContent;
 }
 
 // ── Self-memory (Igni's own reflections) ──

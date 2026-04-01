@@ -4,15 +4,20 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import type { Message } from '@/types';
 
 interface Props {
-  onSend: (message: string, replyToId?: string) => void;
+  onSend: (message: string, replyToId?: string, imageFile?: File) => void;
   disabled: boolean;
   replyTo?: Message | null;
   onCancelReply?: () => void;
 }
 
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
+
 export default function ChatInput({ onSend, disabled, replyTo, onCancelReply }: Props) {
   const [text, setText] = useState('');
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Refocus textarea whenever generation finishes
   useEffect(() => {
@@ -26,14 +31,16 @@ export default function ChatInput({ onSend, disabled, replyTo, onCancelReply }: 
 
   const handleSend = useCallback(() => {
     const trimmed = text.trim();
-    if (!trimmed || disabled) return;
-    onSend(trimmed, replyTo?.id);
+    if ((!trimmed && !imageFile) || disabled) return;
+    onSend(trimmed || '(sent an image)', replyTo?.id, imageFile || undefined);
     setText('');
+    setImageFile(null);
+    setImagePreview(null);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       textareaRef.current.focus();
     }
-  }, [text, disabled, onSend, replyTo]);
+  }, [text, imageFile, disabled, onSend, replyTo]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -48,6 +55,34 @@ export default function ChatInput({ onSend, disabled, replyTo, onCancelReply }: 
       el.style.height = 'auto';
       el.style.height = Math.min(120, el.scrollHeight) + 'px';
     }
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > MAX_IMAGE_SIZE) {
+      alert('Image must be under 5MB');
+      return;
+    }
+
+    if (!file.type.startsWith('image/')) {
+      alert('Only image files are supported');
+      return;
+    }
+
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setImagePreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+
+    // Reset input so same file can be re-selected
+    e.target.value = '';
+  };
+
+  const removeImage = () => {
+    setImageFile(null);
+    setImagePreview(null);
   };
 
   return (
@@ -76,7 +111,46 @@ export default function ChatInput({ onSend, disabled, replyTo, onCancelReply }: 
         </div>
       )}
 
+      {/* Image preview */}
+      {imagePreview && (
+        <div className="px-3 pt-2">
+          <div className="relative inline-block">
+            <img
+              src={imagePreview}
+              alt="Upload preview"
+              className="h-20 rounded-lg border border-border object-cover"
+            />
+            <button
+              onClick={removeImage}
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-xs hover:bg-red-600"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-end gap-2 px-3 py-2">
+        {/* Image upload button */}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={disabled}
+          className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-text-secondary hover:text-text hover:bg-surface-light transition-colors disabled:opacity-40"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <polyline points="21 15 16 10 5 21" />
+          </svg>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          onChange={handleImageSelect}
+          className="hidden"
+        />
+
         <textarea
           ref={textareaRef}
           value={text}
@@ -90,7 +164,7 @@ export default function ChatInput({ onSend, disabled, replyTo, onCancelReply }: 
         />
         <button
           onClick={handleSend}
-          disabled={!text.trim() || disabled}
+          disabled={(!text.trim() && !imageFile) || disabled}
           className="w-10 h-10 rounded-full bg-accent text-white flex items-center justify-center shrink-0 disabled:bg-surface-light disabled:text-text-secondary hover:brightness-110 transition-colors"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

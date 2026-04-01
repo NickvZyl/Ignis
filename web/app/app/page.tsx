@@ -230,9 +230,9 @@ export default function Home() {
   }, [messages]);
 
   const handleSend = useCallback(
-    (content: string, replyToId?: string) => {
+    (content: string, replyToId?: string, imageFile?: File) => {
       if (!userId) return;
-      sendMessage(content, userId, replyToId);
+      sendMessage(content, userId, replyToId, imageFile);
       setReplyTo(null);
     },
     [userId, sendMessage],
