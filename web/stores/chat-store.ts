@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { supabase } from '@web/lib/supabase';
 import { api } from '@web/lib/api';
 import { buildSystemPrompt, buildMemoryExtractionPrompt } from '@/prompts/system';
-import type { ScheduleContext } from '@/prompts/system';
+import type { ScheduleContext, EnrichedContext } from '@/prompts/system';
 import { loadSchedule, getCurrentSlot } from '@web/lib/schedule';
 import { useCompanionStore } from './companion-store';
 import { useEnvironmentStore, getWeatherCategory } from './environment-store';
@@ -512,21 +512,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
           .eq('id', userMsg.id);
       }
 
-      // 4. Retrieve relevant memories
-      const memories = await retrieveMemories(content, userId);
-      console.log('[Chat] memories loaded:', memories.length, memories.map(m => m.content));
-
-      // 4b. Retrieve self-memories + self-knowledge
-      const [selfMemories, selfKnowledge] = await Promise.all([
+      // 4. Retrieve all context in parallel
+      const [memories, selfMemories, selfKnowledge, enriched] = await Promise.all([
+        retrieveMemories(content, userId),
         retrieveSelfMemories(userId),
         loadSelfKnowledge(userId),
+        loadEnrichedContext(userId, get().conversationId, get().messages),
       ]);
+      console.log('[Chat] context loaded — memories:', memories.length, 'summaries:', enriched.conversationSummaries?.length, 'activities:', enriched.activityHistory?.length);
 
       // 5. Build system prompt
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) throw new Error('Emotional state not loaded');
 
-      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages));
+      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
 
       // 5b. Clear morning thought after it's been included in a prompt (one-time use)
       if (emotionalState.morning_thought) {
@@ -910,15 +909,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isGenerating: true, error: null });
 
     try {
-      const [memories, selfMemories, selfKnowledge] = await Promise.all([
+      const [memories, selfMemories, selfKnowledge, enriched] = await Promise.all([
         retrieveMemories('', userId),
         retrieveSelfMemories(userId),
         loadSelfKnowledge(userId),
+        loadEnrichedContext(userId, get().conversationId, get().messages),
       ]);
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages));
+      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
 
       let greetingContext: string;
       if (hoursSince < 6) {
@@ -1045,15 +1045,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isGenerating: true, error: null });
 
     try {
-      const [memories, selfMemories, selfKnowledge] = await Promise.all([
+      const [memories, selfMemories, selfKnowledge, enriched] = await Promise.all([
         retrieveMemories('', userId),
         retrieveSelfMemories(userId),
         loadSelfKnowledge(userId),
+        loadEnrichedContext(userId, get().conversationId, get().messages),
       ]);
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages));
+      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
 
       const { nextCheckinReason } = get();
       const checkinContext = nextCheckinReason
@@ -1162,15 +1163,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isGenerating: true, error: null });
 
     try {
-      const [memories, selfMemories, selfKnowledge] = await Promise.all([
+      const [memories, selfMemories, selfKnowledge, enriched] = await Promise.all([
         retrieveMemories('', userId),
         retrieveSelfMemories(userId),
         loadSelfKnowledge(userId),
+        loadEnrichedContext(userId, get().conversationId, get().messages),
       ]);
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const basePrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages));
+      const basePrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
       const systemPrompt = basePrompt + `\n\n## Right now\nYou just said you'd "${context}". You've done it (or tried to). Now follow up naturally — tell your person what happened, whether it worked, what you changed. Be brief and conversational, like continuing a sentence. One short message. Don't re-explain what you were doing, just give the result. If you made schedule changes, reference the specific times and activities you changed.`;
 
       const apiMessages: ChatCompletionMessage[] = [
@@ -1283,15 +1285,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isGenerating: true, error: null });
 
     try {
-      const [memories, selfMemories, selfKnowledge] = await Promise.all([
+      const [memories, selfMemories, selfKnowledge, enriched] = await Promise.all([
         retrieveMemories('', userId),
         retrieveSelfMemories(userId),
         loadSelfKnowledge(userId),
+        loadEnrichedContext(userId, get().conversationId, get().messages),
       ]);
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages));
+      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
 
       const apiMessages: ChatCompletionMessage[] = [
         { role: 'system', content: systemPrompt + `\n\n## Right now\nYou just had this thought: "${thought}". Share it naturally with your person — bring it up casually, like mentioning something you noticed or were thinking about. One short message. Don't quote it verbatim, paraphrase it in your own voice.` },
@@ -1395,39 +1398,57 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
 async function retrieveMemories(query: string, userId: string): Promise<Memory[]> {
   try {
-    // Get embedding for semantic search
-    const embedRes = await fetch(api('/api/embed'), {
+    // Load critical facts (high importance) and vector-matched memories in parallel
+    const criticalPromise = supabase
+      .from('memories')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('importance', 0.8)
+      .order('importance', { ascending: false })
+      .limit(5);
+
+    const embedPromise = fetch(api('/api/embed'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: query }),
     });
 
-    if (!embedRes.ok) {
-      console.warn('[Memory] embedding failed, falling back to importance sort');
-      const { data } = await supabase
-        .from('memories')
-        .select('*')
-        .eq('user_id', userId)
-        .order('importance', { ascending: false })
-        .limit(5);
-      return data || [];
+    const [criticalRes, embedRes] = await Promise.all([criticalPromise, embedPromise]);
+    const criticalMemories: Memory[] = criticalRes.data || [];
+
+    let vectorMemories: Memory[] = [];
+    if (embedRes.ok) {
+      const { embedding } = await embedRes.json();
+      const { data } = await supabase.rpc('match_memories', {
+        query_embedding: JSON.stringify(embedding),
+        match_user_id: userId,
+        match_threshold: 0.5,
+        match_count: 7,
+      });
+      vectorMemories = data || [];
     }
 
-    const { embedding } = await embedRes.json();
+    // Merge: critical facts first, then vector matches (deduplicated)
+    const seenIds = new Set(criticalMemories.map(m => m.id));
+    const merged = [...criticalMemories];
+    for (const m of vectorMemories) {
+      if (!seenIds.has(m.id)) {
+        merged.push(m);
+        seenIds.add(m.id);
+      }
+    }
 
-    // Vector similarity search
-    const { data, error } = await supabase.rpc('match_memories', {
-      query_embedding: JSON.stringify(embedding),
-      match_user_id: userId,
-      match_threshold: 0.5,
-      match_count: 5,
-    });
-
-    if (error) throw error;
-    return data || [];
+    return merged.slice(0, 10);
   } catch (err) {
     console.error('[Memory] retrieval failed:', err);
-    return [];
+    // Fallback: just get top memories by importance
+    const { data } = await supabase
+      .from('memories')
+      .select('*')
+      .eq('user_id', userId)
+      .order('importance', { ascending: false })
+      .limit(8);
+    return data || [];
   }
 }
 
@@ -1440,8 +1461,96 @@ async function retrieveSelfMemories(userId: string): Promise<SelfMemory[]> {
   }
 }
 
-async function loadSelfKnowledge(_userId: string): Promise<Array<{ category: string; key: string; content: string; source: string }>> {
-  // Self-knowledge is now hardcoded in the prompt to save ~3000 tokens per message.
-  // The DB entries are kept for reference but not loaded into every prompt.
-  return [];
+async function loadSelfKnowledge(userId: string): Promise<Array<{ category: string; key: string; content: string; source: string }>> {
+  try {
+    const { data } = await supabase
+      .from('self_knowledge')
+      .select('category, key, content, source')
+      .eq('user_id', userId);
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadUserProfile(userId: string): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from('profiles')
+      .select('display_name')
+      .eq('id', userId)
+      .single();
+    return data?.display_name || null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadConversationSummaries(userId: string, currentConvoId: string | null): Promise<Array<{ summary: string; created_at: string }>> {
+  try {
+    let query = supabase
+      .from('conversations')
+      .select('summary, created_at')
+      .eq('user_id', userId)
+      .not('summary', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (currentConvoId) {
+      query = query.neq('id', currentConvoId);
+    }
+    const { data } = await query;
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadActivityHistory(userId: string): Promise<Array<{ scene: string; furniture: string; activity_label: string; emotion: string; started_at: string }>> {
+  try {
+    const { data } = await supabase
+      .from('activity_log')
+      .select('scene, furniture, activity_label, emotion, started_at')
+      .eq('user_id', userId)
+      .order('started_at', { ascending: false })
+      .limit(8);
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
+function computeEmotionalSignals(messages: Message[]): { recentDepth: number; recentKeywords: string[] } {
+  const recent = messages.slice(-10);
+  let totalDepth = 0;
+  let count = 0;
+  const keywords = new Set<string>();
+
+  for (const m of recent) {
+    const signals = m.emotional_signals as any;
+    if (!signals) continue;
+    if (signals.depth_signal !== undefined) { totalDepth += signals.depth_signal; count++; }
+    if (signals.keywords) {
+      for (const kw of signals.keywords) keywords.add(kw);
+    }
+  }
+
+  return {
+    recentDepth: count > 0 ? totalDepth / count : 0,
+    recentKeywords: Array.from(keywords).slice(0, 6),
+  };
+}
+
+async function loadEnrichedContext(userId: string, conversationId: string | null, messages: Message[]): Promise<EnrichedContext> {
+  const [userName, conversationSummaries, activityHistory] = await Promise.all([
+    loadUserProfile(userId),
+    loadConversationSummaries(userId, conversationId),
+    loadActivityHistory(userId),
+  ]);
+
+  return {
+    userName,
+    conversationSummaries,
+    activityHistory,
+    emotionalSignals: computeEmotionalSignals(messages),
+  };
 }

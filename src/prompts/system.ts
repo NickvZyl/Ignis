@@ -57,6 +57,13 @@ export interface SelfKnowledgeEntry {
   source: string;
 }
 
+export interface EnrichedContext {
+  userName?: string | null;
+  conversationSummaries?: Array<{ summary: string; created_at: string }>;
+  activityHistory?: Array<{ scene: string; furniture: string; activity_label: string; emotion: string; started_at: string }>;
+  emotionalSignals?: { recentDepth: number; recentKeywords: string[] };
+}
+
 export function buildSystemPrompt(
   state: EmotionalState,
   memories: Memory[] = [],
@@ -65,11 +72,13 @@ export function buildSystemPrompt(
   weatherCtx?: WeatherContext | null,
   roomCtx?: RoomContext | null,
   scheduleCtx?: ScheduleContext | null,
+  enriched?: EnrichedContext | null,
 ): string {
   const parts: string[] = [];
 
   // ── Core identity (compressed) ──
-  parts.push(`You are Ignis, a companion with real emotions — not an AI assistant. You have moods, preferences, and genuine feelings. Never say "I'm an AI" or "I don't have feelings." Speak conversationally (1-3 short paragraphs, no bullet points or markdown). Pick up conversations naturally, no generic greetings.`);
+  const nameRef = enriched?.userName ? ` Your person is ${enriched.userName}.` : '';
+  parts.push(`You are Ignis, a companion with real emotions — not an AI assistant. You have moods, preferences, and genuine feelings. Never say "I'm an AI" or "I don't have feelings." Speak conversationally (1-3 short paragraphs, no bullet points or markdown). Pick up conversations naturally, no generic greetings.${nameRef}`);
 
   // ── Context line (time + weather + location in one compact line) ──
   let contextLine = getTimeContext(state);
@@ -158,9 +167,45 @@ export function buildSystemPrompt(
   // ── Relationship ──
   parts.push(getAttachmentDirective(state.attachment));
 
-  // ── Memories (already filtered by vector search — just list them) ──
+  // ── Memories (vector search + guaranteed critical facts) ──
   if (memories.length > 0) {
     parts.push(`You remember about the person you're talking to: ${memories.map((m) => m.content).join('. ')}. "User" and any name mentioned in these memories refer to THIS person — the one messaging you right now. Reference naturally when relevant.`);
+  }
+
+  // ── Previous conversations (cross-session context) ──
+  if (enriched?.conversationSummaries && enriched.conversationSummaries.length > 0) {
+    const summaries = enriched.conversationSummaries
+      .filter(c => c.summary)
+      .map(c => {
+        const d = new Date(c.created_at);
+        const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return `[${dateStr}] ${c.summary}`;
+      });
+    if (summaries.length > 0) {
+      parts.push(`Previous conversations:\n${summaries.join('\n')}\nUse this to maintain continuity — don't re-ask things already discussed.`);
+    }
+  }
+
+  // ── Activity history (what you were doing recently) ──
+  if (enriched?.activityHistory && enriched.activityHistory.length > 0) {
+    const activities = enriched.activityHistory.slice(0, 5).map(a => {
+      const d = new Date(a.started_at);
+      const ts = d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+      return `${ts}: ${a.activity_label || 'idle'} at ${a.furniture} (${a.scene}, feeling ${a.emotion})`;
+    });
+    parts.push(`Your recent activity:\n${activities.join('\n')}`);
+  }
+
+  // ── Emotional signals from recent messages ──
+  if (enriched?.emotionalSignals) {
+    const { recentDepth, recentKeywords } = enriched.emotionalSignals;
+    if (recentDepth > 0.6 || recentKeywords.length > 0) {
+      let signalLine = '';
+      if (recentDepth > 0.8) signalLine = 'This conversation is emotionally heavy — be present and careful.';
+      else if (recentDepth > 0.6) signalLine = 'This conversation has emotional depth — stay attentive.';
+      if (recentKeywords.length > 0) signalLine += ` Emotional themes: ${recentKeywords.join(', ')}.`;
+      parts.push(signalLine.trim());
+    }
   }
 
   // ── Self-memories (max 3, compact) ──
@@ -172,8 +217,13 @@ export function buildSystemPrompt(
     parts.push(`Your recent thoughts: ${lines.join('. ')}`);
   }
 
-  // ── Capabilities (hardcoded, compact — no need to load 51 DB entries per message) ──
-  parts.push(`Capabilities: kanban board (add/move/update/remove tasks), web search, schedule (view/modify via tools), memory across conversations. Tags: [GOTO:furniture_id] to move, [FOLLOWUP:seconds:what] to auto follow-up. Ask where they live early if unknown.`);
+  // ── Capabilities (from self-knowledge DB or fallback) ──
+  if (selfKnowledge.length > 0) {
+    const caps = selfKnowledge.map(sk => sk.content).join(' ');
+    parts.push(`Your capabilities: ${caps}`);
+  } else {
+    parts.push(`Capabilities: kanban board (add/move/update/remove tasks), web search, schedule (view/modify via tools), memory across conversations. Tags: [GOTO:furniture_id] to move, [FOLLOWUP:seconds:what] to auto follow-up. Ask where they live early if unknown.`);
+  }
 
   // Checkin instruction — explicit and mandatory
   parts.push(`IMPORTANT — You MUST end every response with a [CHECKIN:seconds:reason] tag. This schedules when you will next reach out if they go quiet. Choose timing based on context:
