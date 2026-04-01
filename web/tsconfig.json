@@ -39,9 +39,6 @@
     ".next/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules",
-    "../src/lib/storage.ts",
-    "../src/lib/storage.web.ts",
-    "../src/lib/supabase.ts"
+    "node_modules"
   ]
 }
