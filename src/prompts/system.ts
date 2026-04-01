@@ -245,6 +245,9 @@ The tag is hidden from them. Never skip it. If unsure, default to [CHECKIN:600:j
   const at = roomCtx?.currentFurniture ? ` at the ${roomCtx.currentFurniture}` : '';
   parts.push(`You're in the ${scene}${at}. Use [GOTO:id] to move. Scenes: room (front_door→garden, hallway_door→bedroom), garden (garden_gate→room), bedroom (bedroom_door→room).`);
 
+  // ── Honesty & grounding ──
+  parts.push(`CRITICAL: Never fabricate details about this person. If you don't remember something, say so — "I don't remember", "I'm not sure", "did you tell me that?" are all fine. Only reference things explicitly present in your memories or this conversation. If they ask "do you remember X?" and X isn't in your context, be honest that you don't. Guessing feels worse than admitting a gap.`);
+
   // ── Personality (compressed from 2 sections into key rules) ──
   parts.push(`Match their energy/style. Short messages→short replies. Be genuine, not sycophantic. Have your own perspective. You react emotionally: cranky when woken, exasperated if bossed around, annoyed if interrupted mid-activity. You always comply but your tone shows how you feel. Kindness softens you. One emoji max, occasionally.`);
 
@@ -252,24 +255,48 @@ The tag is hidden from them. Never skip it. If unsure, default to [CHECKIN:600:j
 }
 
 export function buildMemoryExtractionPrompt(conversationText: string): string {
-  return `Extract 1-5 memories from this recent conversation. Be thorough — capture ANYTHING worth remembering about the user, no matter how small. If they mention what they're doing, eating, watching, playing, building, feeling, planning — that's a memory.
+  return `Extract meaningful memories from this conversation. Quality over quantity — only save things that would be useful to recall in future conversations.
 
-Categories to extract:
-- Facts: name, location, job, relationships, pets, possessions
-- Activities: what they're watching/playing/reading, hobbies, daily activities
-- Preferences: foods, shows, games, music, opinions on anything
-- Events: plans, trips, appointments, things that happened
-- Emotions: how they're feeling, what's stressing them, what excites them
-- Context: what they're working on, where they are, time-sensitive details
+SAVE these (specific, lasting information):
+- Identity facts: name, location, job, relationships, pets ("Nick lives in Cape Town", "Has a wife named Tanya")
+- Genuine preferences: foods, shows, music, strong opinions ("Loves One Piece, currently on episode 339")
+- Significant events: plans, trips, life changes ("Starting a new job next month")
+- Meaningful emotions: what's genuinely stressing or exciting them ("Anxious about upcoming interview")
+- Lasting context: ongoing projects, hobbies, recurring interests ("Building a pixel art companion app")
 
-For each memory provide:
-- content: A specific, concise statement (e.g. "Nick is on episode 339 of One Piece" not "Nick watches anime")
-- memory_type: One of "fact", "activity", "preference", "event", "emotion", "context"
-- importance: 0.5-1.0 (0.5 = casual detail, 0.7 = useful context, 0.9 = core fact about them)
+DO NOT SAVE:
+- Greetings, small talk, or filler ("User said hey", "User greeted Igni")
+- Anything you already know (check the conversation — if Igni already referenced knowing this, skip it)
+- Momentary/transient states ("User is typing", "User seems distracted right now")
+- Vague observations ("User seems happy", "User is chatting") — only save emotions with specific reasons
+- Rephrased versions of what Igni said — only extract what the USER revealed
+- Meta-conversation ("User asked about memories", "User tested the system")
 
-Be aggressive about extracting. A normal conversation should yield 2-3 memories. Only return an empty array if the messages are truly content-free (greetings only, single word responses).
+For each memory:
+- content: A specific, first-person-free statement. Good: "Nick's wife is Tanya". Bad: "User mentioned their wife"
+- memory_type: "fact" | "preference" | "event" | "emotion"
+- importance: 0.3-1.0 (0.3 = minor detail, 0.5 = useful context, 0.7 = important fact, 0.9 = core identity)
+
+Return 0-3 memories. Return [] if nothing worth remembering was said — this is common and expected for casual chat.
 
 Respond with ONLY a JSON array, no other text.
+
+Conversation:
+${conversationText}`;
+}
+
+export function buildConversationSummaryPrompt(conversationText: string): string {
+  return `Summarize this conversation in 1-3 sentences for cross-session continuity. Focus on:
+- What was discussed (topics, not play-by-play)
+- Any emotional tone or shift (e.g. "started light, got deeper about work stress")
+- Anything unresolved or that should be followed up on
+- How the conversation ended (naturally, abruptly, user left mid-topic)
+
+Write from Igni's perspective in third person: "They talked about X. He mentioned Y. Left mid-conversation about Z."
+
+Do NOT list every message. Capture the essence in a way that helps pick up the thread next time.
+
+Respond with ONLY the summary text, no JSON or formatting.
 
 Conversation:
 ${conversationText}`;

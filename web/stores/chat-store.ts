@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '@web/lib/supabase';
 import { api } from '@web/lib/api';
-import { buildSystemPrompt, buildMemoryExtractionPrompt } from '@/prompts/system';
+import { buildSystemPrompt, buildMemoryExtractionPrompt, buildConversationSummaryPrompt } from '@/prompts/system';
 import type { ScheduleContext, EnrichedContext } from '@/prompts/system';
 import { loadSchedule, getCurrentSlot } from '@web/lib/schedule';
 import { useCompanionStore } from './companion-store';
@@ -380,6 +380,28 @@ function detectFurnitureCommand(message: string): string | null {
 let exchangesSinceExtraction = 0;
 let followupTimer: ReturnType<typeof setTimeout> | null = null;
 
+// ── Session context cache ──
+// Static context that doesn't change mid-conversation
+interface SessionContextCache {
+  userName: string | null;
+  selfKnowledge: Array<{ category: string; key: string; content: string; source: string }>;
+  activityHistory: Array<{ scene: string; furniture: string; activity_label: string; emotion: string; started_at: string }>;
+}
+let sessionContextCache: SessionContextCache | null = null;
+
+async function getOrLoadSessionContext(userId: string, conversationId: string | null): Promise<SessionContextCache> {
+  if (sessionContextCache) return sessionContextCache;
+
+  const [userName, selfKnowledge, activityHistory] = await Promise.all([
+    loadUserProfile(userId),
+    loadSelfKnowledge(userId),
+    loadActivityHistory(userId),
+  ]);
+
+  sessionContextCache = { userName, selfKnowledge, activityHistory };
+  return sessionContextCache;
+}
+
 interface ChatState {
   messages: Message[];
   conversationId: string | null;
@@ -513,12 +535,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       // 4. Retrieve all context in parallel
-      const [memories, selfMemories, selfKnowledge, enriched] = await Promise.all([
+      const [memories, selfMemories, cached, enriched] = await Promise.all([
         retrieveMemories(content, userId),
         retrieveSelfMemories(userId),
-        loadSelfKnowledge(userId),
+        getOrLoadSessionContext(userId, get().conversationId),
         loadEnrichedContext(userId, get().conversationId, get().messages),
       ]);
+      const selfKnowledge = cached.selfKnowledge;
       console.log('[Chat] context loaded — memories:', memories.length, 'summaries:', enriched.conversationSummaries?.length, 'activities:', enriched.activityHistory?.length);
 
       // 5. Build system prompt
@@ -879,23 +902,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
 
-      // Save summary/snapshot but do NOT close the conversation.
-      // Conversations are only closed by explicit clearChat().
+      // Save emotional snapshot (summary is now generated on clearChat)
       if (conversationId) {
         const emotionalState = useCompanionStore.getState().emotionalState;
-        await supabase
-          .from('conversations')
-          .update({
-            summary: extracted.map((m) => m.content).join('; '),
-            emotional_snapshot: emotionalState
-              ? {
-                  valence: emotionalState.valence,
-                  arousal: emotionalState.arousal,
-                  active_emotion: emotionalState.active_emotion,
-                }
-              : null,
-          })
-          .eq('id', conversationId);
+        if (emotionalState) {
+          await supabase
+            .from('conversations')
+            .update({
+              emotional_snapshot: {
+                valence: emotionalState.valence,
+                arousal: emotionalState.arousal,
+                active_emotion: emotionalState.active_emotion,
+              },
+            })
+            .eq('id', conversationId);
+        }
       }
     } catch {
       // Memory extraction is best-effort
@@ -909,12 +930,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isGenerating: true, error: null });
 
     try {
-      const [memories, selfMemories, selfKnowledge, enriched] = await Promise.all([
+      const [memories, selfMemories, cached, enriched] = await Promise.all([
         retrieveMemories('', userId),
         retrieveSelfMemories(userId),
-        loadSelfKnowledge(userId),
+        getOrLoadSessionContext(userId, get().conversationId),
         loadEnrichedContext(userId, get().conversationId, get().messages),
       ]);
+      const selfKnowledge = cached.selfKnowledge;
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
@@ -1045,12 +1067,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isGenerating: true, error: null });
 
     try {
-      const [memories, selfMemories, selfKnowledge, enriched] = await Promise.all([
+      const [memories, selfMemories, cached, enriched] = await Promise.all([
         retrieveMemories('', userId),
         retrieveSelfMemories(userId),
-        loadSelfKnowledge(userId),
+        getOrLoadSessionContext(userId, get().conversationId),
         loadEnrichedContext(userId, get().conversationId, get().messages),
       ]);
+      const selfKnowledge = cached.selfKnowledge;
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
@@ -1163,12 +1186,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isGenerating: true, error: null });
 
     try {
-      const [memories, selfMemories, selfKnowledge, enriched] = await Promise.all([
+      const [memories, selfMemories, cached, enriched] = await Promise.all([
         retrieveMemories('', userId),
         retrieveSelfMemories(userId),
-        loadSelfKnowledge(userId),
+        getOrLoadSessionContext(userId, get().conversationId),
         loadEnrichedContext(userId, get().conversationId, get().messages),
       ]);
+      const selfKnowledge = cached.selfKnowledge;
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
@@ -1285,12 +1309,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isGenerating: true, error: null });
 
     try {
-      const [memories, selfMemories, selfKnowledge, enriched] = await Promise.all([
+      const [memories, selfMemories, cached, enriched] = await Promise.all([
         retrieveMemories('', userId),
         retrieveSelfMemories(userId),
-        loadSelfKnowledge(userId),
+        getOrLoadSessionContext(userId, get().conversationId),
         loadEnrichedContext(userId, get().conversationId, get().messages),
       ]);
+      const selfKnowledge = cached.selfKnowledge;
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
@@ -1388,17 +1413,57 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   clearChat: () => {
-    const { conversationId } = get();
-    if (conversationId) {
+    const { conversationId, messages } = get();
+    if (conversationId && messages.length >= 4) {
+      // Generate a real conversation summary before closing
+      const conversationText = messages
+        .slice(-30) // last 30 messages for context
+        .map((m) => `${m.role}: ${m.content}`)
+        .join('\n');
+      const summaryPrompt = buildConversationSummaryPrompt(conversationText);
+
+      // Fire-and-forget: generate summary then close conversation
+      fetch(api('/api/extract'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: summaryPrompt }] }),
+      })
+        .then((res) => res.ok ? res.json() : null)
+        .then((data) => {
+          const summary = data?.content?.trim();
+          const emotionalState = useCompanionStore.getState().emotionalState;
+          supabase.from('conversations').update({
+            ended_at: new Date().toISOString(),
+            summary: summary || null,
+            emotional_snapshot: emotionalState
+              ? { valence: emotionalState.valence, arousal: emotionalState.arousal, active_emotion: emotionalState.active_emotion }
+              : null,
+          }).eq('id', conversationId);
+        })
+        .catch(() => {
+          // Fallback: close without summary
+          supabase.from('conversations').update({ ended_at: new Date().toISOString() }).eq('id', conversationId);
+        });
+    } else if (conversationId) {
       supabase.from('conversations').update({ ended_at: new Date().toISOString() }).eq('id', conversationId);
     }
+    // Clear session cache
+    sessionContextCache = null;
     set({ messages: [], conversationId: null, isGenerating: false, streamingMessageId: null, error: null });
   },
 }));
 
 async function retrieveMemories(query: string, userId: string): Promise<Memory[]> {
   try {
-    // Load critical facts (high importance) and vector-matched memories in parallel
+    // Load fact-type memories, critical facts, and vector-matched memories in parallel
+    const factPromise = supabase
+      .from('memories')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('memory_type', 'fact')
+      .order('importance', { ascending: false })
+      .limit(8);
+
     const criticalPromise = supabase
       .from('memories')
       .select('*')
@@ -1407,17 +1472,20 @@ async function retrieveMemories(query: string, userId: string): Promise<Memory[]
       .order('importance', { ascending: false })
       .limit(5);
 
-    const embedPromise = fetch(api('/api/embed'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: query }),
-    });
+    const embedPromise = query
+      ? fetch(api('/api/embed'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: query }),
+        })
+      : Promise.resolve(null);
 
-    const [criticalRes, embedRes] = await Promise.all([criticalPromise, embedPromise]);
+    const [factRes, criticalRes, embedRes] = await Promise.all([factPromise, criticalPromise, embedPromise]);
+    const factMemories: Memory[] = factRes.data || [];
     const criticalMemories: Memory[] = criticalRes.data || [];
 
     let vectorMemories: Memory[] = [];
-    if (embedRes.ok) {
+    if (embedRes && embedRes.ok) {
       const { embedding } = await embedRes.json();
       const { data } = await supabase.rpc('match_memories', {
         query_embedding: JSON.stringify(embedding),
@@ -1428,26 +1496,28 @@ async function retrieveMemories(query: string, userId: string): Promise<Memory[]
       vectorMemories = data || [];
     }
 
-    // Merge: critical facts first, then vector matches (deduplicated)
-    const seenIds = new Set(criticalMemories.map(m => m.id));
-    const merged = [...criticalMemories];
-    for (const m of vectorMemories) {
-      if (!seenIds.has(m.id)) {
-        merged.push(m);
-        seenIds.add(m.id);
+    // Merge: facts first (always present), then critical, then vector matches (deduplicated)
+    const seenIds = new Set<string>();
+    const merged: Memory[] = [];
+    for (const group of [factMemories, criticalMemories, vectorMemories]) {
+      for (const m of group) {
+        if (!seenIds.has(m.id)) {
+          merged.push(m);
+          seenIds.add(m.id);
+        }
       }
     }
 
-    return merged.slice(0, 10);
+    return merged.slice(0, 12);
   } catch (err) {
     console.error('[Memory] retrieval failed:', err);
-    // Fallback: just get top memories by importance
+    // Fallback: facts + top memories by importance
     const { data } = await supabase
       .from('memories')
       .select('*')
       .eq('user_id', userId)
       .order('importance', { ascending: false })
-      .limit(8);
+      .limit(10);
     return data || [];
   }
 }
@@ -1544,16 +1614,16 @@ function computeEmotionalSignals(messages: Message[]): { recentDepth: number; re
 }
 
 async function loadEnrichedContext(userId: string, conversationId: string | null, messages: Message[]): Promise<EnrichedContext> {
-  const [userName, conversationSummaries, activityHistory] = await Promise.all([
-    loadUserProfile(userId),
+  // Use session cache for static data, only fetch dynamic data (conversation summaries)
+  const [cached, conversationSummaries] = await Promise.all([
+    getOrLoadSessionContext(userId, conversationId),
     loadConversationSummaries(userId, conversationId),
-    loadActivityHistory(userId),
   ]);
 
   return {
-    userName,
+    userName: cached.userName,
     conversationSummaries,
-    activityHistory,
+    activityHistory: cached.activityHistory,
     emotionalSignals: computeEmotionalSignals(messages),
   };
 }
