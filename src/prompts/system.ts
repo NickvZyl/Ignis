@@ -132,10 +132,13 @@ export function buildSystemPrompt(
     }
   } catch {}
 
-  // ── Emotion (primary + secondary + self-awareness, compact) ──
+  // ── Emotion (primary + secondary + reason + self-awareness, compact) ──
   let emotionLine = `Feeling: ${state.active_emotion}. ${EMOTIONAL_DIRECTIVES[state.active_emotion]}`;
   if (state.secondary_emotion && EMOTIONAL_DIRECTIVES[state.secondary_emotion]) {
     emotionLine += ` Also ${state.secondary_emotion}.`;
+  }
+  if (state.emotion_reason) {
+    emotionLine += ` ${state.emotion_reason}`;
   }
   parts.push(emotionLine);
 

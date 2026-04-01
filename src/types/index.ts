@@ -8,6 +8,7 @@ export interface EmotionalState {
   active_emotion: EmotionLabel;
   secondary_emotion: EmotionLabel | null;
   inner_conflict: string | null;
+  emotion_reason: string | null;
   morning_thought: string | null;
   active_role: RoleLabel;
   last_interaction_at: string;

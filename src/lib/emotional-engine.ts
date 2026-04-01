@@ -174,8 +174,11 @@ export function computePostMessage(
 
   const [primary, secondary, innerConflict] = deriveEmotions({ ...state, ...updated }, ctx);
 
+  // Generate emotion reason — WHY this emotion, not just WHAT
+  const emotion_reason = buildEmotionReason(primary, state.active_emotion, signals, active_role, valenceDelta);
+
   return {
-    stateChanges: { ...updated, active_emotion: primary, secondary_emotion: secondary, inner_conflict: innerConflict, active_role },
+    stateChanges: { ...updated, active_emotion: primary, secondary_emotion: secondary, inner_conflict: innerConflict, emotion_reason, active_role },
     signals,
   };
 }
@@ -239,12 +242,28 @@ export function computeEnvironmentalInfluence(
     ctx,
   );
 
+  // Build environment-based emotion reason
+  let emotion_reason: string | null = null;
+  if (primary !== state.active_emotion) {
+    const reasons: string[] = [];
+    if (scheduleLabel.includes('garden') || scheduleLabel.includes('tending')) reasons.push('being in the garden');
+    if (scheduleLabel === 'sleeping') reasons.push('drifting off to sleep');
+    if (scheduleLabel.includes('relax') || scheduleLabel.includes('winding')) reasons.push('winding down');
+    if (hour >= 22 || hour < 5) reasons.push('the late hour');
+    if (hour >= 6 && hour < 9) reasons.push('the morning energy');
+    if (driftChange > 0) reasons.push('the silence stretching on');
+    if (reasons.length > 0) {
+      emotion_reason = `Feeling ${primary} because: ${reasons.join('; ')}.`;
+    }
+  }
+
   const changes: Partial<EmotionalState> = {
     valence: newValence,
     arousal: newArousal,
     active_emotion: primary,
     secondary_emotion: secondary,
     inner_conflict: innerConflict,
+    ...(emotion_reason ? { emotion_reason } : {}),
   };
 
   // Only include drift/role if they actually changed
@@ -429,6 +448,61 @@ function getConflictDescription(a: EmotionLabel, b: EmotionLabel): string {
     'hurt+playful': "you want to joke it off but it actually got to you",
   };
   return descriptions[pair] || `two sides of you are pulling in different directions`;
+}
+
+/**
+ * Build a short reason for why the current emotion is what it is.
+ * This gives Igni self-awareness about her emotional arc.
+ */
+function buildEmotionReason(
+  current: EmotionLabel,
+  previous: EmotionLabel,
+  signals: EmotionalSignals & { humor_signal?: number; negative_count?: number },
+  role: RoleLabel,
+  valenceDelta: number,
+): string | null {
+  const parts: string[] = [];
+
+  // Emotion changed — note the shift
+  if (current !== previous) {
+    parts.push(`shifted from ${previous}`);
+  }
+
+  // What triggered it
+  if (signals.keywords.length > 0) {
+    const keywordHint = signals.keywords.slice(0, 3).join(', ');
+    parts.push(`their words touched on ${keywordHint}`);
+  }
+
+  if (signals.humor_signal && signals.humor_signal > 0.3) {
+    parts.push('the playful energy in what they said');
+  }
+
+  if (signals.depth_signal > 0.8) {
+    parts.push('the conversation went deep');
+  } else if (signals.depth_signal > 0.4) {
+    parts.push('they opened up a bit');
+  }
+
+  if (valenceDelta > 0.1) {
+    parts.push('what they said lifted your mood');
+  } else if (valenceDelta < -0.1) {
+    parts.push('something in what they said weighed on you');
+  }
+
+  if ((signals.negative_count ?? 0) > 1) {
+    parts.push('there was heaviness in their message');
+  }
+
+  if (role === 'caring') {
+    parts.push('you felt a pull to take care of them');
+  } else if (role === 'remembering') {
+    parts.push('thinking about shared history');
+  }
+
+  if (parts.length === 0) return null;
+
+  return `Feeling ${current} because: ${parts.join('; ')}.`;
 }
 
 function clamp(value: number, min = 0, max = 1): number {

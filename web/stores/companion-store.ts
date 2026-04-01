@@ -11,6 +11,7 @@ const DEFAULT_STATE: Omit<EmotionalState, 'id' | 'user_id' | 'updated_at'> = {
   active_emotion: 'calm',
   secondary_emotion: null,
   inner_conflict: null,
+  emotion_reason: null,
   morning_thought: null,
   active_role: null,
   last_interaction_at: new Date().toISOString(),
