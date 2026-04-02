@@ -930,12 +930,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
 
+        // Compute follow-up date for event memories with temporal language
+        let follow_up_at: string | null = null;
+        if (mem.memory_type === 'event') {
+          const lower = mem.content.toLowerCase();
+          const now = new Date();
+          if (/\b(tomorrow)\b/.test(lower)) { now.setDate(now.getDate() + 2); follow_up_at = now.toISOString(); }
+          else if (/\b(this weekend|on saturday|on sunday)\b/.test(lower)) { const d = new Date(); d.setDate(d.getDate() + (8 - d.getDay()) % 7 + 1); follow_up_at = d.toISOString(); }
+          else if (/\b(next week)\b/.test(lower)) { now.setDate(now.getDate() + 5); follow_up_at = now.toISOString(); }
+          else if (/\b(next month)\b/.test(lower)) { now.setDate(now.getDate() + 14); follow_up_at = now.toISOString(); }
+          else if (/\b(tonight|today|later)\b/.test(lower)) { now.setHours(now.getHours() + 6); follow_up_at = now.toISOString(); }
+          else { now.setDate(now.getDate() + 3); follow_up_at = now.toISOString(); } // default: follow up in 3 days
+        }
+
         const { error: insertErr } = await supabase.from('memories').insert({
           user_id: userId,
           content: mem.content,
           memory_type: mem.memory_type,
           importance: mem.importance,
           ...(embedding ? { embedding: JSON.stringify(embedding) } : {}),
+          ...(follow_up_at ? { follow_up_at } : {}),
         });
         if (insertErr) {
           console.error('[Memory] insert failed:', insertErr);
@@ -1677,10 +1691,13 @@ function computeEmotionalSignals(messages: Message[]): { recentDepth: number; re
 
 async function loadEnrichedContext(userId: string, conversationId: string | null, messages: Message[]): Promise<EnrichedContext> {
   // Use session cache for static data, fetch dynamic data fresh
-  const [cached, conversationSummaries, recentChanges] = await Promise.all([
+  const [cached, conversationSummaries, recentChanges, relationshipStats, opinions, patterns] = await Promise.all([
     getOrLoadSessionContext(userId, conversationId),
     loadConversationSummaries(userId, conversationId),
     loadRecentChanges(),
+    loadRelationshipStats(userId),
+    loadOpinions(userId),
+    loadPatternObservations(userId),
   ]);
 
   return {
@@ -1689,5 +1706,54 @@ async function loadEnrichedContext(userId: string, conversationId: string | null
     activityHistory: cached.activityHistory,
     emotionalSignals: computeEmotionalSignals(messages),
     recentChanges,
+    totalMessages: relationshipStats.totalMessages,
+    daysSinceFirst: relationshipStats.daysSinceFirst,
+    opinions,
+    patternObservations: patterns,
   };
+}
+
+async function loadRelationshipStats(userId: string): Promise<{ totalMessages: number; daysSinceFirst: number }> {
+  try {
+    const [msgCount, firstConvo] = await Promise.all([
+      supabase.from('messages').select('id', { count: 'exact', head: true })
+        .eq('role', 'user'),
+      supabase.from('conversations').select('created_at')
+        .eq('user_id', userId).order('created_at', { ascending: true }).limit(1),
+    ]);
+    const total = msgCount.count ?? 0;
+    const firstDate = firstConvo.data?.[0]?.created_at;
+    const days = firstDate ? (Date.now() - new Date(firstDate).getTime()) / (1000 * 60 * 60 * 24) : 0;
+    return { totalMessages: total, daysSinceFirst: Math.round(days) };
+  } catch {
+    return { totalMessages: 100, daysSinceFirst: 30 };
+  }
+}
+
+async function loadOpinions(userId: string): Promise<Array<{ content: string }>> {
+  try {
+    const { data } = await supabase.from('self_memories')
+      .select('content')
+      .eq('user_id', userId)
+      .eq('memory_type', 'opinion')
+      .order('created_at', { ascending: false })
+      .limit(3);
+    return data || [];
+  } catch {
+    return [];
+  }
+}
+
+async function loadPatternObservations(userId: string): Promise<string[]> {
+  try {
+    const { data } = await supabase.from('self_memories')
+      .select('content')
+      .eq('user_id', userId)
+      .eq('memory_type', 'pattern')
+      .order('importance', { ascending: false })
+      .limit(3);
+    return data?.map(d => d.content) || [];
+  } catch {
+    return [];
+  }
 }

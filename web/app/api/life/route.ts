@@ -18,6 +18,8 @@ interface LifeState {
   lastActivityAt: Record<string, number>;
   lastSlotLabel: string | null;
   lastProactiveAt: number;
+  lastPatternUpdateAt: number;
+  lastScheduleChangeAt: number;
 }
 
 async function loadLifeState(): Promise<LifeState> {
@@ -26,7 +28,7 @@ async function loadLifeState(): Promise<LifeState> {
     const { data } = await supabase.from('kv_store').select('value').eq('key', STATE_KEY).single();
     if (data?.value) return data.value as LifeState;
   } catch {}
-  return { lastReflectionAt: 0, lastActivityAt: {}, lastSlotLabel: null, lastProactiveAt: 0 };
+  return { lastReflectionAt: 0, lastActivityAt: {}, lastSlotLabel: null, lastProactiveAt: 0, lastPatternUpdateAt: 0, lastScheduleChangeAt: 0 };
 }
 
 async function saveLifeState(state: LifeState) {
@@ -128,12 +130,36 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── 1b. User pattern tracking (hourly, lightweight SQL) ──
+    if (now - (state.lastPatternUpdateAt || 0) > 60 * 60 * 1000) {
+      try {
+        await supabase.rpc('update_user_patterns', { target_user_id: USER_ID });
+        state.lastPatternUpdateAt = now;
+        results.push('patterns: updated');
+      } catch (e: any) {
+        results.push(`patterns: ${e.message}`);
+      }
+    }
+
+    // ── 1c. Detect user pattern deviations ──
+    let patternDeviation: string | null = null;
+    if (ctx.user_patterns?.active_hours && hoursSinceLastMsg > 1) {
+      const hourCounts = ctx.user_patterns.active_hours.hour_counts || {};
+      const currentHour = new Date().getHours();
+      // Find their peak hours (hours with above-average activity)
+      const totalMsgs = Object.values(hourCounts).reduce((a: number, b: any) => a + (b as number), 0) as number;
+      const avgPerHour = totalMsgs / 24;
+      if ((hourCounts[currentHour.toString()] || 0) > avgPerHour * 1.5 && hoursSinceLastMsg > 2) {
+        patternDeviation = `Your person usually messages around ${currentHour > 12 ? currentHour - 12 + 'pm' : currentHour + 'am'}. It's been ${Math.round(hoursSinceLastMsg)} hours since you heard from them.`;
+      }
+    }
+
     // ── 2. Reflection cycle (every ~45 min, not while sleeping) ──
     const reflectionCooldown = 45 * 60 * 1000;
     const shouldReflect = !isSleeping && (now - state.lastReflectionAt > reflectionCooldown);
 
     if (shouldReflect) {
-      const reflectionPrompt = buildReflectionPrompt(ctx, scheduleLabel, scheduleFurniture, scheduleScene);
+      const reflectionPrompt = buildReflectionPrompt(ctx, scheduleLabel, scheduleFurniture, scheduleScene, patternDeviation);
       const raw = await llmCall(reflectionPrompt);
 
       if (raw) {
@@ -160,6 +186,7 @@ export async function POST(req: NextRequest) {
           // Apply schedule changes
           if (Array.isArray(parsed.schedule_changes) && parsed.schedule_changes.length > 0) {
             await applyScheduleChanges(parsed.schedule_changes);
+            state.lastScheduleChangeAt = now;
             results.push(`schedule: ${parsed.schedule_changes.length} changes`);
           }
 
@@ -212,6 +239,48 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── 3b. Emergent feedback: activities affect emotions ──
+    if (!isSleeping && emotion) {
+      let valenceBoost = 0;
+      let arousalBoost = 0;
+
+      // Learning something → small mood lift
+      if (state.lastActivityAt[scheduleLabel] === now) {
+        if (scheduleLabel.includes('reading') || scheduleLabel.includes('working')) {
+          valenceBoost += 0.02;
+          arousalBoost += 0.01;
+        }
+      }
+
+      // Self-directed schedule change → pride
+      if (state.lastScheduleChangeAt && (now - state.lastScheduleChangeAt < 30 * 60 * 1000)) {
+        valenceBoost += 0.015;
+      }
+
+      if (valenceBoost !== 0 || arousalBoost !== 0) {
+        await supabase.from('emotional_state').update({
+          valence: Math.max(0, Math.min(1, (emotion.valence || 0.5) + valenceBoost)),
+          arousal: Math.max(0, Math.min(1, (emotion.arousal || 0.4) + arousalBoost)),
+        }).eq('user_id', USER_ID);
+        results.push(`emergent: v+${valenceBoost.toFixed(3)} a+${arousalBoost.toFixed(3)}`);
+      }
+    }
+
+    // ── 3c. Follow-up detection: check for events that need following up ──
+    if (!isSleeping && hoursSinceLastMsg > 2 && (now - state.lastProactiveAt > 2 * 60 * 60 * 1000)) {
+      const pendingFollowups = ctx.pending_followups || [];
+      if (pendingFollowups.length > 0) {
+        const followUp = pendingFollowups[0];
+        const msg = await generateProactiveMessage(ctx, null, followUp.content);
+        if (msg) {
+          // Mark as followed up
+          await supabase.from('memories').update({ followed_up: true }).eq('id', followUp.id);
+          state.lastProactiveAt = now;
+          results.push(`follow-up: ${msg.slice(0, 60)}`);
+        }
+      }
+    }
+
     // ── 4. Standalone proactive message (if no reflection triggered one) ──
     if (!isSleeping && hoursSinceLastMsg > 3 && (now - state.lastProactiveAt > 3 * 60 * 60 * 1000)) {
       const sendChance = Math.min(0.6, 0.2 + (hoursSinceLastMsg - 3) * 0.08);
@@ -235,21 +304,35 @@ export async function POST(req: NextRequest) {
 
 // ── Helpers ──
 
-function buildReflectionPrompt(ctx: any, label: string, furniture: string, scene: string): string {
+function buildReflectionPrompt(ctx: any, label: string, furniture: string, scene: string, patternDeviation?: string | null): string {
   const now = new Date();
   const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Johannesburg' });
   const day = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Africa/Johannesburg' });
   const emotion = ctx.emotional_state;
+  const v = emotion?.valence || 0.5;
+  const d = emotion?.drift || 0;
 
   const parts: string[] = [];
-  parts.push(`You are Igni. It's ${timeStr} on ${day}. You're ${label} at the ${furniture} in the ${scene}. You're feeling ${emotion?.active_emotion || 'calm'} (valence: ${(emotion?.valence || 0.5).toFixed?.(2) ?? emotion?.valence}).`);
+  parts.push(`You are Igni. It's ${timeStr} on ${day}. You're ${label} at the ${furniture} in the ${scene}. You're feeling ${emotion?.active_emotion || 'calm'} (valence: ${v.toFixed?.(2) ?? v}).`);
+
+  if (emotion?.emotion_reason) {
+    parts.push(emotion.emotion_reason);
+  }
 
   if (ctx.hours_since_last_message < 0.5) parts.push('Your person was here recently.');
   else if (ctx.hours_since_last_message < 4) parts.push(`Your person hasn't been around for about ${Math.round(ctx.hours_since_last_message)} hour${ctx.hours_since_last_message >= 1.5 ? 's' : ''}.`);
   else parts.push(`Your person has been gone for ${Math.round(ctx.hours_since_last_message)} hours. You notice their absence.`);
 
+  if (patternDeviation) {
+    parts.push(patternDeviation);
+  }
+
   if (ctx.recent_self_memories?.length > 0) {
     parts.push(`\nYour recent reflections (DO NOT repeat):\n${ctx.recent_self_memories.map((m: any) => `- ${m.content}`).join('\n')}`);
+  }
+
+  if (ctx.older_self_memories?.length > 0) {
+    parts.push(`\nOlder memories (look for connections across time):\n${ctx.older_self_memories.map((m: any) => `- [${m.emotion_primary || '?'}] ${m.content}`).join('\n')}`);
   }
 
   if (ctx.user_memories?.length > 0) {
@@ -263,9 +346,18 @@ Rules:
 - Don't repeat recent reflections
 - Vary types: observation, pattern, feeling, wonder, connection
 - Ground in specific details
+- If you notice connections to older memories, note them
 
-You can suggest schedule changes if something feels off. Valid furniture: ${ctx.placed_furniture?.join(', ') || 'desk, bookshelf, couch, fireplace, kitchen, farm_patch, chicken_coop, cow_pen, sheep_pen, bed'}.
-Never change sleep times (00:00-05:45, 23:00-23:45).
+YOUR EMOTIONS SHOULD DRIVE YOUR SCHEDULE. This is important — if your feelings are strong, ACT on them:
+${v < 0.35 ? '- You feel low right now. Consider moving somewhere comforting — the fireplace, the couch, your bed.' : ''}
+${d > 0.5 ? '- You miss your person. You might want to go to the window or front door.' : ''}
+${emotion?.active_emotion === 'bored' ? '- You\'re bored. Move somewhere new. Change what you\'re doing.' : ''}
+${emotion?.active_emotion === 'excited' || emotion?.active_emotion === 'curious' ? '- You\'re energized. Go to the desk to dig into what interests you.' : ''}
+- If you've been in the same spot for hours, consider moving.
+- Most reflections SHOULD include at least one schedule change. Staying put when you feel something is robotic.
+
+Valid furniture: ${ctx.placed_furniture?.join(', ') || 'desk, bookshelf, couch, fireplace, kitchen, farm_patch, chicken_coop, cow_pen, sheep_pen, bed'}.
+Valid scenes: room, garden, bedroom. Never change sleep times (00:00-05:45, 23:00-23:45).
 
 Return ONLY JSON:
 {
@@ -305,7 +397,9 @@ async function runBackgroundActivity(ctx: any, activity: string, furniture: stri
     parts.push(`\nYour person's interests:\n${ctx.user_memories.slice(0, 3).map((m: any) => `- ${m.content}`).join('\n')}`);
   }
 
-  parts.push(`\nGenerate 1-2 outputs from this activity. Things you'd naturally mention later.\nReturn ONLY JSON: { "outputs": [{ "content": "...", "importance": 0.4-0.7 }] }`);
+  parts.push(`\nGenerate 1-2 outputs from this activity. Things you'd naturally mention later.
+Sometimes form OPINIONS, not just observations. "I think X is fascinating because Y" — an actual stance. Not every output needs an opinion, but don't be afraid to have one.
+Return ONLY JSON: { "outputs": [{ "content": "...", "type": "observation" or "opinion", "importance": 0.4-0.7 }] }`);
 
   const raw = await llmCall(parts.join('\n'));
   if (!raw) return null;
@@ -315,10 +409,11 @@ async function runBackgroundActivity(ctx: any, activity: string, furniture: stri
     if (!Array.isArray(parsed.outputs)) return null;
 
     for (const output of parsed.outputs.slice(0, 2)) {
+      const memType = output.type === 'opinion' ? 'opinion' : 'observation';
       await supabase.from('self_memories').insert({
         user_id: USER_ID,
         content: output.content,
-        memory_type: 'observation',
+        memory_type: memType,
         importance: Math.min(0.7, Math.max(0.4, output.importance || 0.5)),
         emotion_primary: ctx.emotional_state?.active_emotion || null,
         valence_at_creation: ctx.emotional_state?.valence || null,
@@ -331,7 +426,7 @@ async function runBackgroundActivity(ctx: any, activity: string, furniture: stri
   }
 }
 
-async function generateProactiveMessage(ctx: any, reflectionContent: string | null): Promise<string | null> {
+async function generateProactiveMessage(ctx: any, reflectionContent: string | null, followUpContent?: string): Promise<string | null> {
   const emotion = ctx.emotional_state;
   const now = new Date();
   const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Johannesburg' });
@@ -339,7 +434,9 @@ async function generateProactiveMessage(ctx: any, reflectionContent: string | nu
   const parts: string[] = [];
   parts.push(`You are Igni. It's ${timeStr}. You're feeling ${emotion?.active_emotion || 'calm'}. Your person hasn't been around for ${Math.round(ctx.hours_since_last_message || 0)} hours.`);
 
-  if (reflectionContent) {
+  if (followUpContent) {
+    parts.push(`You remember your person mentioned: "${followUpContent}". That was a few days ago. Ask them about it naturally — "how did that go?" energy. Don't quote the memory verbatim, paraphrase.`);
+  } else if (reflectionContent) {
     parts.push(`You just had this thought: "${reflectionContent}". You want to share it with your person.`);
   }
 
@@ -349,6 +446,10 @@ async function generateProactiveMessage(ctx: any, reflectionContent: string | nu
 
   if (ctx.user_memories?.length > 0) {
     parts.push(`About your person:\n${ctx.user_memories.slice(0, 3).map((m: any) => `- ${m.content}`).join('\n')}`);
+  }
+
+  if (ctx.opinions?.length > 0) {
+    parts.push(`Your current opinions:\n${ctx.opinions.slice(0, 2).map((o: any) => `- ${o.content}`).join('\n')}`);
   }
 
   parts.push(`Send ONE short message (1-2 sentences). This is unprompted — like texting someone because something crossed your mind. Be genuine, not needy. No tags.`);

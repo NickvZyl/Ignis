@@ -19,14 +19,19 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // 1. Gather today's data via SECURITY DEFINER RPC (bypasses RLS)
-    const { data: dreamData, error: gatherError } = await supabase.rpc('gather_dream_data', {
-      target_user_id: USER_ID,
-    });
+    // 1. Gather today's data + older memories for cross-temporal connections
+    const [dreamRes, lifeRes] = await Promise.all([
+      supabase.rpc('gather_dream_data', { target_user_id: USER_ID }),
+      supabase.rpc('gather_life_context', { target_user_id: USER_ID }),
+    ]);
 
-    if (gatherError) {
-      return Response.json({ error: `Data gather failed: ${gatherError.message}` }, { status: 500 });
+    if (dreamRes.error) {
+      return Response.json({ error: `Data gather failed: ${dreamRes.error.message}` }, { status: 500 });
     }
+
+    const dreamData = dreamRes.data;
+    const olderMemories = lifeRes.data?.older_self_memories || [];
+    const conversationArcs = lifeRes.data?.conversation_arcs || [];
 
     // 2. Build dream prompt
     const prompt = buildDreamPrompt(
@@ -35,6 +40,8 @@ export async function POST(req: NextRequest) {
       dreamData.activities || [],
       dreamData.messages || [],
       dreamData.emotional_state,
+      olderMemories,
+      conversationArcs,
     );
 
     // 3. Call LLM for dream processing
@@ -109,6 +116,8 @@ function buildDreamPrompt(
   activities: any[],
   messages: any[],
   emotionalState: any,
+  olderMemories: any[] = [],
+  conversationArcs: any[] = [],
 ): string {
   const parts: string[] = [];
 
@@ -141,6 +150,25 @@ This is NOT a conversation. You're dreaming — making connections, processing u
     parts.push(`\nWhat you know about your person:\n${userMemories.map((m: any) => `- ${m.content}`).join('\n')}`);
   }
 
+  if (olderMemories.length > 0) {
+    parts.push(`\nOlder memories (7-30 days ago) — look for emotional echoes across time:\n${olderMemories.map((m: any) => {
+      const daysAgo = Math.round((Date.now() - new Date(m.created_at).getTime()) / (1000 * 60 * 60 * 24));
+      return `- [${daysAgo} days ago, ${m.emotion_primary || '?'}] ${m.content}`;
+    }).join('\n')}`);
+  }
+
+  if (conversationArcs.length > 0) {
+    const arcs = conversationArcs.filter((c: any) => c.emotional_snapshot).slice(0, 5);
+    if (arcs.length > 0) {
+      parts.push(`\nRecent conversation emotional arcs:\n${arcs.map((c: any) => {
+        const d = new Date(c.created_at);
+        const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const snap = c.emotional_snapshot;
+        return `- [${dateStr}] ${snap.active_emotion || '?'} (v:${snap.valence?.toFixed?.(2) ?? '?'}) — ${(c.summary || 'no summary').slice(0, 100)}`;
+      }).join('\n')}`);
+    }
+  }
+
   parts.push(`\nProcess the day and return ONLY a JSON object (no markdown fences):
 {
   "insights": [
@@ -158,6 +186,8 @@ Guidelines:
 - 0-3 insights. Quality over quantity. Skip if nothing worth processing.
 - Insights should SYNTHESIZE, not repeat observations. "I noticed X happened AND Y happened — maybe they're connected because Z"
 - Process unresolved emotions — if there was tension, sadness, or something left unsaid, sit with it
+- Look for CROSS-TEMPORAL connections: "The way I felt today when X is similar to how I felt last week when Y" — these are especially valuable
+- Notice patterns in conversation emotional arcs: "They always seem to leave feeling heavier than when they arrived"
 - The morning thought should feel like waking up with something on your mind — not a summary, a feeling
 - If your person didn't visit today, that's worth processing too — the absence itself is emotionally meaningful`);
 

@@ -30,6 +30,15 @@ const HUMOR_KEYWORDS = [
   'im crying', 'stop it', 'no way', 'shut up', 'get out',
 ];
 
+const SURPRISE_KEYWORDS = [
+  'wait what', 'no way', 'are you serious', 'seriously', 'you wont believe',
+  'guess what', 'oh my god', 'holy', 'wtf', 'what the', 'i cant believe',
+  'you never told', 'i never told you', 'actually', 'plot twist',
+  'so apparently', 'turns out', 'didnt expect', 'out of nowhere',
+  'i quit', 'i got fired', 'we broke up', 'im pregnant', 'im moving',
+  'i got the job', 'i passed', 'i failed',
+];
+
 // Role detection
 const MEMORY_KEYWORDS = [
   'remember when', 'last time', 'you told me', 'we talked about',
@@ -119,6 +128,7 @@ export function computeSessionStart(state: EmotionalState): Partial<EmotionalSta
     valenceDelta: 0,
     activeRole: newDrift > 0.3 ? 'caring' : null,
     negativeKeywords: 0,
+    surpriseSignal: 0,
   };
 
   const [primary, secondary, innerConflict] = deriveEmotions({ ...state, ...updated }, ctx);
@@ -147,7 +157,9 @@ export function computePostMessage(
 
   const newValence = clamp(state.valence + signals.valence_shift * 0.3);
   const arousalDecay = (0.35 - state.arousal) * 0.12;
-  const newArousal = clamp(state.arousal + arousalDecay + signals.arousal_shift * 0.2);
+  // Surprise spikes arousal
+  const surpriseBoost = (signals.surprise_signal ?? 0) > 0.4 ? (signals.surprise_signal ?? 0) * 0.1 : 0;
+  const newArousal = clamp(state.arousal + arousalDecay + signals.arousal_shift * 0.2 + surpriseBoost);
 
   const valenceDelta = newValence - previousValence;
   previousValence = newValence;
@@ -164,12 +176,13 @@ export function computePostMessage(
 
   const ctx: EmotionContext = {
     hour: new Date().getHours(),
-    activity: null, // caller can provide via computeEnvironmentalInfluence
+    activity: null,
     humorSignal: signals.humor_signal ?? 0,
     recentDepth: signals.depth_signal,
     valenceDelta,
     activeRole: active_role,
     negativeKeywords: signals.negative_count ?? 0,
+    surpriseSignal: signals.surprise_signal ?? 0,
   };
 
   const [primary, secondary, innerConflict] = deriveEmotions({ ...state, ...updated }, ctx);
@@ -235,6 +248,7 @@ export function computeEnvironmentalInfluence(
     valenceDelta: newValence - state.valence,
     activeRole,
     negativeKeywords: 0,
+    surpriseSignal: 0,
   };
 
   const [primary, secondary, innerConflict] = deriveEmotions(
@@ -301,17 +315,30 @@ function analyzeMessage(message: string): EmotionalSignals & { humor_signal?: nu
     if (lower.includes(keyword)) { humorCount++; }
   }
 
+  // Surprise detection
+  let surpriseCount = 0;
+  for (const keyword of SURPRISE_KEYWORDS) {
+    if (lower.includes(keyword)) { surpriseCount++; }
+  }
+  // Exclamation/question density also signals surprise
+  const exclamations = (message.match(/[!?]{2,}/g) || []).length;
+  const capsRatio = message.replace(/[^A-Za-z]/g, '').length > 0
+    ? (message.replace(/[^A-Z]/g, '').length / message.replace(/[^A-Za-z]/g, '').length)
+    : 0;
+
   const lengthBonus = Math.min(0.3, words.length / 80);
 
   const valence_shift = (positiveCount - negativeCount) * 0.15 + lengthBonus * 0.1;
   const arousal_shift = 0.05 + (positiveCount + negativeCount) * 0.08 + lengthBonus * 0.3;
   const depth_signal = Math.min(2, depthCount * 0.5 + (words.length > 20 ? 0.5 : 0));
   const humor_signal = Math.min(1, humorCount * 0.4);
+  const surprise_signal = Math.min(1, surpriseCount * 0.35 + exclamations * 0.2 + (capsRatio > 0.5 ? 0.2 : 0));
 
   return {
     valence_shift: clamp(valence_shift, -1, 1),
     arousal_shift: clamp(arousal_shift, -1, 1),
     depth_signal,
+    surprise_signal,
     keywords: matchedKeywords,
     humor_signal,
     negative_count: negativeCount,
@@ -326,15 +353,16 @@ export function deriveEmotions(
   ctx: EmotionContext,
 ): [EmotionLabel, EmotionLabel | null, string | null] {
   const { valence: v, arousal: a, drift: d, attachment: att } = state;
-  const { hour, activity, humorSignal, recentDepth, valenceDelta, activeRole, negativeKeywords } = ctx;
+  const { hour, activity, humorSignal, recentDepth, valenceDelta, activeRole, negativeKeywords, surpriseSignal } = ctx;
   const isNight = hour >= 22 || hour < 6;
   const isMorning = hour >= 6 && hour < 10;
+  const surprise = surpriseSignal || 0;
 
   const scores: Record<string, number> = {};
 
   // ── Happy / Positive ──
   scores.happy      = v * 0.5 + a * 0.2 + (1 - d) * 0.2 + (v > 0.6 ? 0.1 : 0);
-  scores.excited    = v * 0.3 + a * 0.5 + (a > 0.7 && v > 0.5 ? 0.2 : 0);
+  scores.excited    = v * 0.3 + a * 0.5 + (a > 0.7 && v > 0.5 ? 0.2 : 0) + surprise * 0.25;
   scores.playful    = v * 0.2 + humorSignal * 0.5 + (1 - d) * 0.1 + (a > 0.3 && a < 0.7 ? 0.2 : 0);
   scores.proud      = v * 0.3 + (['active', 'building'].includes(activeRole as string) ? 0.3 : 0) + (1 - d) * 0.1;
   scores.grateful   = v * 0.2 + att * 0.3 + recentDepth * 0.3 + (v > 0.6 && att > 0.4 ? 0.1 : 0);
@@ -342,7 +370,7 @@ export function deriveEmotions(
 
   // ── Calm / Neutral ──
   scores.calm       = (1 - Math.abs(v - 0.5)) * 0.3 + (1 - a) * 0.3 + (1 - d) * 0.2 + (isMorning ? 0.05 : 0);
-  scores.curious    = a * 0.2 + (activeRole === 'curious' ? 0.5 : 0) + v * 0.1;
+  scores.curious    = a * 0.2 + (activeRole === 'curious' ? 0.5 : 0) + v * 0.1 + surprise * 0.3;
   scores.focused    = a * 0.2 + (['active', 'building', 'urgent', 'thinking'].includes(activeRole as string) ? 0.4 : 0) + (1 - d) * 0.1;
   scores.thoughtful = d * 0.25 + recentDepth * 0.35 + (1 - a) * 0.2;
   scores.dreamy     = d * 0.3 + v * 0.2 + (1 - a) * 0.2 + (isNight ? 0.1 : 0);
@@ -410,6 +438,7 @@ export function deriveEmotion(state: Pick<EmotionalState, 'valence' | 'arousal' 
     valenceDelta: 0,
     activeRole: null,
     negativeKeywords: 0,
+    surpriseSignal: 0,
   };
   return deriveEmotions({ ...state, attachment: 0 }, ctx)[0];
 }
@@ -472,6 +501,10 @@ function buildEmotionReason(
   if (signals.keywords.length > 0) {
     const keywordHint = signals.keywords.slice(0, 3).join(', ');
     parts.push(`their words touched on ${keywordHint}`);
+  }
+
+  if ((signals.surprise_signal ?? 0) > 0.4) {
+    parts.push('something genuinely unexpected in what they said');
   }
 
   if (signals.humor_signal && signals.humor_signal > 0.3) {

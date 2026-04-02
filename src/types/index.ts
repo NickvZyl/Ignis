@@ -27,6 +27,8 @@ export type EmotionLabel =
 
 export type RoleLabel = 'curious' | 'urgent' | 'building' | 'thinking' | 'remembering' | 'caring' | 'active' | null;
 
+export type RelationshipPhase = 'stranger' | 'acquaintance' | 'friend' | 'close_friend' | 'bonded';
+
 export interface EmotionContext {
   hour: number;
   activity: string | null;
@@ -35,6 +37,7 @@ export interface EmotionContext {
   valenceDelta: number;
   activeRole: RoleLabel;
   negativeKeywords: number;
+  surpriseSignal: number;
 }
 
 export interface Message {
@@ -52,6 +55,7 @@ export interface EmotionalSignals {
   valence_shift: number;
   arousal_shift: number;
   depth_signal: number;
+  surprise_signal: number;
   keywords: string[];
 }
 

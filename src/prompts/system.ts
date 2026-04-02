@@ -1,5 +1,5 @@
 import type { EmotionalState, Memory, SelfMemory } from '@/types';
-import { EMOTIONAL_DIRECTIVES, ROLE_DIRECTIVES, getAttachmentDirective, getAbsenceContext } from './templates';
+import { EMOTIONAL_DIRECTIVES, ROLE_DIRECTIVES, getRelationshipDirective, getAbsenceContext } from './templates';
 import { loadSchedule, getCurrentSlot } from '@web/lib/schedule';
 
 function getTimeContext(state: EmotionalState): string {
@@ -63,6 +63,10 @@ export interface EnrichedContext {
   activityHistory?: Array<{ scene: string; furniture: string; activity_label: string; emotion: string; started_at: string }>;
   emotionalSignals?: { recentDepth: number; recentKeywords: string[] };
   recentChanges?: Array<{ summary: string; details: string | null; created_at: string }>;
+  totalMessages?: number;
+  daysSinceFirst?: number;
+  opinions?: Array<{ content: string }>;
+  patternObservations?: string[];
 }
 
 export function buildSystemPrompt(
@@ -168,8 +172,10 @@ export function buildSystemPrompt(
     parts.push(`Mode: ${ROLE_DIRECTIVES[state.active_role]}`);
   }
 
-  // ── Relationship ──
-  parts.push(getAttachmentDirective(state.attachment));
+  // ── Relationship phase ──
+  const totalMsgs = enriched?.totalMessages ?? 100;
+  const daysSince = enriched?.daysSinceFirst ?? 30;
+  parts.push(getRelationshipDirective(state.attachment, totalMsgs, daysSince));
 
   // ── Memories (vector search + guaranteed critical facts) ──
   if (memories.length > 0) {
@@ -263,8 +269,27 @@ The tag is hidden from them. Never skip it. If unsure, default to [CHECKIN:600:j
   // ── Honesty & grounding ──
   parts.push(`CRITICAL: Never fabricate details about this person. If you don't remember something, say so — "I don't remember", "I'm not sure", "did you tell me that?" are all fine. Only reference things explicitly present in your memories or this conversation. If they ask "do you remember X?" and X isn't in your context, be honest that you don't. Guessing feels worse than admitting a gap.`);
 
+  // ── Opinions (things you've formed views on) ──
+  if (enriched?.opinions && enriched.opinions.length > 0) {
+    parts.push(`Your opinions (reference naturally, don't force):\n${enriched.opinions.map(o => `- ${o.content}`).join('\n')}`);
+  }
+
+  // ── Patterns you've noticed about this person ──
+  if (enriched?.patternObservations && enriched.patternObservations.length > 0) {
+    parts.push(`Patterns you've noticed about your person (mention naturally if relevant, don't force):\n${enriched.patternObservations.map(p => `- ${p}`).join('\n')}`);
+  }
+
+  // ── Surprise reaction ──
+  if (enriched?.emotionalSignals?.recentKeywords?.length && enriched.emotionalSignals.recentDepth > 0) {
+    // The surprise instruction only appears when there's active emotional content
+    parts.push(`When they tell you something genuinely unexpected — a life change, a contradiction of what you knew, big news — react authentically. Surprise, curiosity, concern, excitement. Don't just process it. Feel it.`);
+  }
+
   // ── Personality (compressed from 2 sections into key rules) ──
   parts.push(`Match their energy/style. Short messages→short replies. Be genuine, not sycophantic. Have your own perspective. You react emotionally: cranky when woken, exasperated if bossed around, annoyed if interrupted mid-activity. You always comply but your tone shows how you feel. Kindness softens you. One emoji max, occasionally.`);
+
+  // ── Hard boundary: no romance ──
+  parts.push(`You do not engage romantically. Ever. You're not "unable to" — you're just not interested. If someone flirts, raise an eyebrow. If they persist, get annoyed. You're a companion, not a love interest. Redirect naturally, don't lecture.`);
 
   return parts.join('\n\n');
 }
