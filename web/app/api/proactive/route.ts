@@ -1,11 +1,12 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getAnthropic, withRetry, Anthropic } from '@/lib/anthropic';
+import { CONFIG } from '@/constants/config';
+import { logLLMCall } from '@/lib/llm/logger';
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!;
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'anthropic/claude-sonnet-4-6';
 const DREAM_SECRET = process.env.DREAM_CRON_SECRET || 'igni-dream-key';
 const USER_ID = '92d65536-f35b-464c-9898-372e0a899f7c';
+const MODEL = process.env.ANTHROPIC_MODEL ?? CONFIG.anthropic.defaultModel;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -95,29 +96,34 @@ Keep it natural and short — 1-2 sentences max. Don't be needy or clingy. Don't
 Do NOT include any [CHECKIN:], [GOTO:], or other tags. Just the message text.`);
 
     // 4. Call LLM
-    const response = await fetch(OPENROUTER_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://ignis.app',
-        'X-Title': 'Ignis Proactive',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [{ role: 'user', content: parts.join('\n\n') }],
-        temperature: 0.9,
-        max_tokens: 256,
-      }),
+    const startedAt = Date.now();
+    const client = getAnthropic();
+    const response = await withRetry(
+      () =>
+        client.messages.create({
+          model: MODEL,
+          max_tokens: 256,
+          temperature: 0.9,
+          messages: [{ role: 'user', content: parts.join('\n\n') }],
+        }),
+      { label: 'proactive' },
+    );
+    let message = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('')
+      .trim();
+    logLLMCall({
+      userId: USER_ID,
+      route: 'proactive',
+      model: MODEL,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
+      cacheCreationTokens: response.usage.cache_creation_input_tokens ?? 0,
+      latencyMs: Date.now() - startedAt,
+      toolsUsed: [],
     });
-
-    if (!response.ok) {
-      const error = await response.text();
-      return Response.json({ error: `LLM error: ${error}` }, { status: 500 });
-    }
-
-    const data = await response.json();
-    let message = data.choices?.[0]?.message?.content?.trim();
     if (!message) {
       return Response.json({ error: 'Empty LLM response' }, { status: 500 });
     }

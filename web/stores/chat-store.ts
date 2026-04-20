@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '@web/lib/supabase';
 import { api } from '@web/lib/api';
-import { buildSystemPrompt, buildMemoryExtractionPrompt, buildConversationSummaryPrompt } from '@/prompts/system';
+import { buildSystemPromptBlocks, buildMemoryExtractionPrompt, buildConversationSummaryPrompt } from '@/prompts/system';
 import type { ScheduleContext, EnrichedContext } from '@/prompts/system';
 import { loadSchedule, getCurrentSlot } from '@web/lib/schedule';
 import { useCompanionStore } from './companion-store';
@@ -576,7 +576,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) throw new Error('Emotional state not loaded');
 
-      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
+      // Only the dynamic block is sent — the server owns the cached static block.
+      const { dynamic: systemPrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
 
       // 5b. Clear morning thought after it's been included in a prompt (one-time use)
       if (emotionalState.morning_thought) {
@@ -996,7 +997,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
+      const { dynamic: systemPrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
 
       let greetingContext: string;
       if (hoursSince < 6) {
@@ -1134,7 +1135,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
+      const { dynamic: systemPrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
 
       const { nextCheckinReason } = get();
       const checkinContext = nextCheckinReason
@@ -1257,7 +1258,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const basePrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
+      const { dynamic: basePrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
       const systemPrompt = basePrompt + `\n\n## Right now\nYou just said you'd "${context}". You've done it (or tried to). Now follow up naturally — tell your person what happened, whether it worked, what you changed. Be brief and conversational, like continuing a sentence. One short message. Don't re-explain what you were doing, just give the result. If you made schedule changes, reference the specific times and activities you changed.`;
 
       const apiMessages: ChatCompletionMessage[] = [
@@ -1381,7 +1382,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const systemPrompt = buildSystemPrompt(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
+      const { dynamic: systemPrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
 
       const apiMessages: ChatCompletionMessage[] = [
         { role: 'system', content: systemPrompt + `\n\n## Right now\nYou just had this thought: "${thought}". Share it naturally with your person — bring it up casually, like mentioning something you noticed or were thinking about. One short message. Don't quote it verbatim, paraphrase it in your own voice.` },

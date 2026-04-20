@@ -1,32 +1,65 @@
 import { NextRequest } from 'next/server';
+import { getAnthropic, withRetry, Anthropic } from '@/lib/anthropic';
+import { pickUtilityModel } from '@/lib/llm/router';
+import { logLLMCall } from '@/lib/llm/logger';
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!;
-
+// Extraction is structured, not conversational — Haiku is fine.
 export async function POST(req: NextRequest) {
-  const { messages } = await req.json();
+  const startedAt = Date.now();
+  const { messages, userId } = await req.json();
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://ignis.app',
-      'X-Title': 'Ignis',
-    },
-    body: JSON.stringify({
-      model: 'anthropic/claude-sonnet-4-6',
-      messages,
-      temperature: 0.3,
-      max_tokens: 1024,
-    }),
-  });
+  // Anthropic requires system as a top-level field, not inside messages.
+  const systemMsg = messages.find((m: any) => m.role === 'system');
+  const convo = messages.filter((m: any) => m.role !== 'system');
+  const model = pickUtilityModel();
 
-  if (!response.ok) {
-    const error = await response.text();
-    return new Response(error, { status: response.status });
+  try {
+    const client = getAnthropic();
+    const response = await withRetry(
+      () =>
+        client.messages.create({
+          model,
+          max_tokens: 1024,
+          temperature: 0.3,
+          system: systemMsg?.content ?? '',
+          messages: convo.map((m: any) => ({ role: m.role, content: m.content })),
+        }),
+      { label: 'extract' },
+    );
+
+    const content =
+      response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('') || '[]';
+
+    logLLMCall({
+      userId: userId ?? null,
+      route: 'extract',
+      model,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
+      cacheCreationTokens: response.usage.cache_creation_input_tokens ?? 0,
+      latencyMs: Date.now() - startedAt,
+      toolsUsed: [],
+    });
+
+    return Response.json({ content });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logLLMCall({
+      userId: userId ?? null,
+      route: 'extract',
+      model,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      latencyMs: Date.now() - startedAt,
+      toolsUsed: [],
+      error: msg,
+    });
+    return new Response(msg, { status: 500 });
   }
-
-  const data = await response.json();
-  const content = data.choices?.[0]?.message?.content || '[]';
-  return Response.json({ content });
 }

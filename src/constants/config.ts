@@ -1,4 +1,14 @@
 export const CONFIG = {
+  // Anthropic handles chat completions. Embeddings still go through OpenRouter
+  // (Anthropic has no embedding endpoint).
+  anthropic: {
+    // Default floor for chat. Router upgrades to opusModel on explicit triggers.
+    defaultModel: 'claude-sonnet-4-6',
+    opusModel: 'claude-opus-4-7',
+    haikuModel: 'claude-haiku-4-5',
+    // Opus cache minimum is 4096 tokens, Sonnet is 2048. We target Sonnet by default.
+    maxTokens: 1024,
+  },
   openrouter: {
     baseUrl: 'https://openrouter.ai/api/v1',
     chatModel: 'anthropic/claude-sonnet-4-6',

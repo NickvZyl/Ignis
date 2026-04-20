@@ -1,9 +1,9 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getAnthropic, withRetry, Anthropic } from '@/lib/anthropic';
+import { CONFIG } from '@/constants/config';
+import { logLLMCall } from '@/lib/llm/logger';
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!;
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'anthropic/claude-sonnet-4-6';
 const DREAM_SECRET = process.env.DREAM_CRON_SECRET || 'igni-dream-key';
 const USER_ID = '92d65536-f35b-464c-9898-372e0a899f7c'; // single-user for now
 
@@ -45,29 +45,34 @@ export async function POST(req: NextRequest) {
     );
 
     // 3. Call LLM for dream processing
-    const response = await fetch(OPENROUTER_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://ignis.app',
-        'X-Title': 'Ignis Dream',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7,
-        max_tokens: 2048,
-      }),
+    const startedAt = Date.now();
+    const dreamModel = process.env.ANTHROPIC_MODEL ?? CONFIG.anthropic.defaultModel;
+    const client = getAnthropic();
+    const response = await withRetry(
+      () =>
+        client.messages.create({
+          model: dreamModel,
+          max_tokens: 2048,
+          temperature: 0.7,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      { label: 'dream' },
+    );
+    const result = response.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
+    logLLMCall({
+      userId: USER_ID,
+      route: 'dream',
+      model: dreamModel,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
+      cacheCreationTokens: response.usage.cache_creation_input_tokens ?? 0,
+      latencyMs: Date.now() - startedAt,
+      toolsUsed: [],
     });
-
-    if (!response.ok) {
-      const error = await response.text();
-      return Response.json({ error: `LLM error: ${error}` }, { status: 500 });
-    }
-
-    const data = await response.json();
-    const result = data.choices?.[0]?.message?.content;
     if (!result) {
       return Response.json({ error: 'Empty LLM response' }, { status: 500 });
     }

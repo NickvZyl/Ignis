@@ -1,11 +1,12 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getAnthropic, withRetry, Anthropic } from '@/lib/anthropic';
+import { CONFIG } from '@/constants/config';
+import { logLLMCall } from '@/lib/llm/logger';
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!;
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const MODEL = 'anthropic/claude-sonnet-4-6';
 const LIFE_SECRET = process.env.DREAM_CRON_SECRET || 'igni-dream-key';
 const USER_ID = '92d65536-f35b-464c-9898-372e0a899f7c';
+const LIFE_MODEL = process.env.ANTHROPIC_MODEL ?? CONFIG.anthropic.defaultModel;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -37,24 +38,46 @@ async function saveLifeState(state: LifeState) {
 
 // ── LLM helper ──
 async function llmCall(prompt: string, temperature = 0.9, maxTokens = 512): Promise<string | null> {
-  const res = await fetch(OPENROUTER_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://ignis.app',
-      'X-Title': 'Ignis Life',
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      temperature,
-      max_tokens: maxTokens,
-    }),
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content?.trim() || null;
+  const startedAt = Date.now();
+  try {
+    const client = getAnthropic();
+    const res = await withRetry(
+      () =>
+        client.messages.create({
+          model: LIFE_MODEL,
+          max_tokens: maxTokens,
+          temperature,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      { label: 'life' },
+    );
+    const text = res.content
+      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+      .map((b) => b.text)
+      .join('')
+      .trim();
+    logLLMCall({
+      userId: USER_ID,
+      route: 'life',
+      model: LIFE_MODEL,
+      inputTokens: res.usage.input_tokens,
+      outputTokens: res.usage.output_tokens,
+      cacheReadTokens: res.usage.cache_read_input_tokens ?? 0,
+      cacheCreationTokens: res.usage.cache_creation_input_tokens ?? 0,
+      latencyMs: Date.now() - startedAt,
+      toolsUsed: [],
+    });
+    return text || null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[life] llmCall failed:', msg);
+    logLLMCall({
+      userId: USER_ID, route: 'life', model: LIFE_MODEL,
+      inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+      latencyMs: Date.now() - startedAt, toolsUsed: [], error: msg,
+    });
+    return null;
+  }
 }
 
 function parseJson(raw: string): any {
