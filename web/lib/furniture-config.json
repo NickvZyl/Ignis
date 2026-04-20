@@ -1,304 +1,310 @@
 {
   "bookshelf": {
-    "spotDx": 0.4718955139639558,
-    "spotDy": 2.062392741700908,
-    "sprite": {
-      "widthPx": 128,
-      "heightPx": 160,
-      "offsetX": 0,
-      "offsetY": -96
-    },
+    "spotDx": -0.25,
+    "spotDy": -1.25,
     "gridW": 2,
     "gridH": 2,
-    "spriteOverrides": {
+    "overhang": {
+      "left": 0,
+      "top": 3,
+      "right": 2,
+      "bottom": 0
+    },
+    "overhangOverrides": {
       "1": {
-        "widthPx": 83.2018927444795,
-        "heightPx": 250,
-        "offsetX": -18.600946372239747,
-        "offsetY": -144
+        "left": 1,
+        "top": 5,
+        "right": 1,
+        "bottom": 2
       },
       "2": {
-        "widthPx": 250,
-        "heightPx": 141.75867507886434,
-        "offsetX": -61,
-        "offsetY": -77.75867507886434
+        "left": 2,
+        "top": 3,
+        "right": 4,
+        "bottom": 0
       },
       "3": {
-        "widthPx": 83.2018927444795,
-        "heightPx": 250,
-        "offsetX": -18.600946372239747,
-        "offsetY": -144
+        "left": 1,
+        "top": 5,
+        "right": 1,
+        "bottom": 2
       }
     }
   },
   "couch": {
-    "spotDx": 3.5,
-    "spotDy": 1,
-    "sprite": {
-      "widthPx": 224,
-      "heightPx": 128,
-      "offsetX": 0,
-      "offsetY": 32
+    "spotDx": 4,
+    "spotDy": 2.75,
+    "gridW": 7,
+    "gridH": 4,
+    "overhang": {
+      "left": 0,
+      "top": -1,
+      "right": 0,
+      "bottom": 1
     },
-    "spriteOverrides": {
+    "overhangOverrides": {
       "1": {
-        "widthPx": 128,
-        "heightPx": 224,
-        "offsetX": 0,
-        "offsetY": 0
+        "left": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0
       },
       "2": {
-        "widthPx": 224,
-        "heightPx": 128,
-        "offsetX": 1,
-        "offsetY": -2
+        "left": 0.5,
+        "right": 0,
+        "top": 0,
+        "bottom": -0.25
       },
       "3": {
-        "widthPx": 128,
-        "heightPx": 224,
-        "offsetX": 0,
-        "offsetY": 0
+        "left": 0,
+        "top": 0,
+        "right": 0,
+        "bottom": 0
       }
-    },
-    "gridW": 7,
-    "gridH": 4
+    }
   },
   "clock_table": {
     "spotDx": 1,
     "spotDy": 1,
-    "sprite": {
-      "widthPx": 67,
-      "heightPx": 115,
-      "offsetX": 15,
-      "offsetY": -19
+    "overhang": {
+      "left": 0,
+      "top": 1,
+      "right": 0,
+      "bottom": 0
     }
   },
   "fridge": {
-    "spotDx": -1,
-    "spotDy": 5,
-    "sprite": {
-      "widthPx": 64,
-      "heightPx": 230,
-      "offsetX": 0,
-      "offsetY": -102
+    "spotDx": 1,
+    "spotDy": 4,
+    "overhang": {
+      "left": 0,
+      "top": 4,
+      "right": 0,
+      "bottom": 0
     }
   },
   "plant": {
-    "spotDx": 2,
-    "spotDy": 1,
-    "sprite": {
-      "widthPx": 51,
-      "heightPx": 83,
-      "offsetX": 7,
-      "offsetY": -19
+    "spotDx": 1,
+    "spotDy": 2,
+    "overhang": {
+      "left": 0,
+      "top": 1,
+      "right": 0,
+      "bottom": 0
     }
   },
   "front_door": {
     "spotDx": 1,
     "spotDy": 1,
-    "sprite": {
-      "widthPx": 77,
-      "heightPx": 160,
-      "offsetX": 10,
-      "offsetY": -96
-    },
     "gridW": 2,
     "gridH": 4,
-    "spriteOverrides": {
+    "overhang": {
+      "left": 0,
+      "top": 3,
+      "right": 1,
+      "bottom": -2
+    },
+    "overhangOverrides": {
       "2": {
-        "widthPx": 68.66957153231661,
-        "heightPx": 145.02760736196316,
-        "offsetX": -2.334785766158305,
-        "offsetY": -17.027607361963163
+        "left": 1,
+        "top": 1,
+        "right": 1,
+        "bottom": 0
       }
     }
   },
   "tall_plant": {
-    "spotDx": -1,
-    "spotDy": 2,
-    "sprite": {
-      "widthPx": 51,
-      "heightPx": 173,
-      "offsetX": 7,
-      "offsetY": -77
+    "spotDx": 1,
+    "spotDy": 3,
+    "overhang": {
+      "left": 0,
+      "top": 3,
+      "right": 0,
+      "bottom": 0
     }
   },
   "succulent": {
     "spotDx": 1,
     "spotDy": 0,
-    "sprite": {
-      "widthPx": 32,
-      "heightPx": 38,
-      "offsetX": 0,
-      "offsetY": -6
+    "overhang": {
+      "left": 0,
+      "top": 1,
+      "right": 0,
+      "bottom": 0
     }
   },
   "floor_lamp": {
-    "spotDx": -2,
-    "spotDy": 2,
-    "sprite": {
-      "widthPx": 38,
-      "heightPx": 211,
-      "offsetX": 13,
-      "offsetY": -115
+    "spotDx": 1,
+    "spotDy": 3,
+    "overhang": {
+      "left": 0,
+      "top": 4,
+      "right": 0,
+      "bottom": 0
     }
   },
   "ceiling_light": {
     "spotDx": 1,
-    "spotDy": 2,
-    "sprite": {
-      "widthPx": 51,
-      "heightPx": 80,
-      "offsetX": 7,
-      "offsetY": -48
+    "spotDy": 8,
+    "overhang": {
+      "left": 0,
+      "top": 2,
+      "right": 0,
+      "bottom": 0
     }
   },
   "garden_gate": {
     "spotDx": 1,
-    "spotDy": -1,
-    "sprite": {
-      "widthPx": 96,
-      "heightPx": 96,
-      "offsetX": 0,
-      "offsetY": -32
+    "spotDy": 0,
+    "overhang": {
+      "left": 0,
+      "top": 1,
+      "right": 0,
+      "bottom": 0
     }
   },
   "farm_patch": {
     "spotDx": 2,
     "spotDy": 3,
-    "sprite": {
-      "widthPx": 128,
-      "heightPx": 86,
-      "offsetX": 0,
-      "offsetY": 10
+    "overhang": {
+      "left": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 0
     }
   },
   "chicken_coop": {
     "spotDx": 1,
     "spotDy": 3,
-    "sprite": {
-      "widthPx": 128,
-      "heightPx": 115,
-      "offsetX": 0,
-      "offsetY": -19
+    "overhang": {
+      "left": 0,
+      "top": 1,
+      "right": 0,
+      "bottom": 0
     }
   },
   "cow_pen": {
     "spotDx": 2,
     "spotDy": 4,
-    "sprite": {
-      "widthPx": 160,
-      "heightPx": 141,
-      "offsetX": 0,
-      "offsetY": -13
+    "overhang": {
+      "left": 0,
+      "top": 1,
+      "right": 0,
+      "bottom": 0
     }
   },
   "sheep_pen": {
     "spotDx": 2,
     "spotDy": 3,
-    "sprite": {
-      "widthPx": 128,
-      "heightPx": 106,
-      "offsetX": 0,
-      "offsetY": -10
+    "overhang": {
+      "left": 0,
+      "top": 1,
+      "right": 0,
+      "bottom": 0
     }
   },
   "bedroom_door": {
     "spotDx": 1,
     "spotDy": 0,
-    "sprite": {
-      "widthPx": 77,
-      "heightPx": 160,
-      "offsetX": -6,
-      "offsetY": -94
-    },
     "gridW": 2,
-    "gridH": 2
+    "gridH": 2,
+    "overhang": {
+      "left": 1,
+      "top": 3,
+      "right": 1,
+      "bottom": 1
+    }
   },
   "fireplace": {
     "gridW": 6,
     "gridH": 3,
-    "spotDx": 3,
-    "spotDy": 2.5,
-    "sprite": {
-      "widthPx": 202,
-      "heightPx": 141,
-      "offsetX": -5,
-      "offsetY": -45
+    "spotDx": 2.5,
+    "spotDy": 2,
+    "overhang": {
+      "left": 1,
+      "top": 2,
+      "right": 1,
+      "bottom": 0
     }
   },
   "tv": {
     "gridW": 4,
     "gridH": 2,
-    "spotDx": -0.7889280585217744,
-    "spotDy": -2.0115689798702903,
-    "sprite": {
-      "widthPx": 120,
-      "heightPx": 99,
-      "offsetX": 6,
-      "offsetY": -37
+    "spotDx": 1.5,
+    "spotDy": 2,
+    "overhang": {
+      "left": 0,
+      "top": 2,
+      "right": 0,
+      "bottom": 0
     }
   },
   "desk": {
-    "gridW": 5,
-    "gridH": 5,
-    "spotDx": 1.706100368437844,
-    "spotDy": 0.20586619859442123,
-    "spriteOverrides": {
+    "gridW": 4,
+    "gridH": 6,
+    "spotDx": 2,
+    "spotDy": 3.5,
+    "overhang": {
+      "left": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 0
+    },
+    "overhangOverrides": {
       "1": {
-        "widthPx": 160,
-        "heightPx": 160,
-        "offsetX": 0,
-        "offsetY": 0
+        "left": 0,
+        "right": 0,
+        "top": 0.25,
+        "bottom": -0.25
       }
     }
   },
   "hallway_door": {
     "gridW": 2,
     "gridH": 3,
-    "spotDx": 0,
+    "spotDx": 1,
     "spotDy": 2,
-    "sprite": {
-      "widthPx": 194,
-      "heightPx": 106,
-      "offsetX": -63,
-      "offsetY": -5
+    "overhang": {
+      "left": 2.75,
+      "right": 4,
+      "top": 1.75,
+      "bottom": 1.5
     }
   },
   "wall_sconce": {
     "gridW": 1,
     "gridH": 1,
-    "spotDx": 0,
-    "spotDy": 2,
-    "sprite": {
-      "widthPx": 64,
-      "heightPx": 45,
-      "offsetX": -16,
-      "offsetY": -10
+    "spotDx": 3.5,
+    "spotDy": 8,
+    "overhang": {
+      "left": 1,
+      "top": 1,
+      "right": 1,
+      "bottom": 1
     }
   },
   "window": {
     "gridW": 6,
     "gridH": 4,
-    "spotDx": 3,
-    "spotDy": 7,
-    "sprite": {
-      "widthPx": 184,
-      "heightPx": 128,
-      "offsetX": 4,
-      "offsetY": 2
+    "spotDx": 4.25,
+    "spotDy": 6,
+    "overhang": {
+      "left": 0,
+      "top": 0,
+      "right": 0,
+      "bottom": 1
     }
   },
   "kitchen": {
-    "gridW": 7,
+    "gridW": 8,
     "gridH": 3,
     "spotDx": 3.5,
-    "spotDy": 3,
-    "sprite": {
-      "widthPx": 246,
-      "heightPx": 172,
-      "offsetX": -7,
-      "offsetY": -71
+    "spotDy": 2.25,
+    "overhang": {
+      "left": 0,
+      "right": 0,
+      "top": 2.75,
+      "bottom": -0.25
     }
   },
   "bed": {
@@ -306,11 +312,11 @@
     "gridH": 5,
     "spotDx": 3.5,
     "spotDy": 1,
-    "sprite": {
-      "widthPx": 354,
-      "heightPx": 247,
-      "offsetX": -51,
-      "offsetY": -66
+    "overhang": {
+      "left": 2,
+      "top": 3,
+      "right": 2,
+      "bottom": 1
     }
   },
   "wardrobe": {
@@ -318,11 +324,11 @@
     "gridH": 2,
     "spotDx": 2.5,
     "spotDy": 2.25,
-    "sprite": {
-      "widthPx": 269,
-      "heightPx": 188,
-      "offsetX": -53,
-      "offsetY": -117
+    "overhang": {
+      "left": 2,
+      "top": 4,
+      "right": 2,
+      "bottom": 1
     }
   },
   "bedroom_window": {
@@ -330,11 +336,11 @@
     "gridH": 3,
     "spotDx": 2.25,
     "spotDy": 5.75,
-    "sprite": {
-      "widthPx": 227,
-      "heightPx": 158,
-      "offsetX": -46,
-      "offsetY": -44
+    "overhang": {
+      "left": 2,
+      "top": 2,
+      "right": 2,
+      "bottom": 1
     }
   },
   "nightstand": {
@@ -342,11 +348,11 @@
     "gridH": 1,
     "spotDx": 1,
     "spotDy": 1.25,
-    "sprite": {
-      "widthPx": 146,
-      "heightPx": 102,
-      "offsetX": -40,
-      "offsetY": -57
+    "overhang": {
+      "left": 2,
+      "top": 2,
+      "right": 2,
+      "bottom": 1
     }
   }
 }

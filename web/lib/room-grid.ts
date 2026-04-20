@@ -31,40 +31,109 @@ export interface RoomLayout {
 export type SpotData = Record<string, { spotDx: number; spotDy: number }>;
 
 // ── Unified furniture config ──
+// Legacy: absolute sprite rectangle in 4x-scaled pixels (kept for one-shot migration).
 export interface SpriteSize { widthPx: number; heightPx: number; offsetX: number; offsetY: number; }
+// Preferred: how far the sprite extends beyond each hitbox edge, in tile units.
+// Signed — negative values inset the sprite inside the hitbox.
+export interface Overhang { top: number; right: number; bottom: number; left: number; }
 export interface FurniturePieceConfig {
   gridW?: number;
   gridH?: number;
   spotDx?: number;
   spotDy?: number;
+  /** @deprecated use `overhang` — auto-migrated at load time */
   sprite?: SpriteSize;
+  /** @deprecated use `overhangOverrides` */
   spriteOverrides?: Record<string, SpriteSize>;
+  overhang?: Overhang;
+  overhangOverrides?: Record<string, Overhang>;
 }
 export type FurnitureConfig = Record<string, FurniturePieceConfig>;
 
 let furnitureConfig: FurnitureConfig = {};
 
+const SPRITE_SCALE = 4; // matches IgnisScene's SCALE — hi-res sprites are in 4x canvas space
+
+function legacySpriteToOverhang(gridW: number, gridH: number, sprite: SpriteSize): Overhang {
+  const px = TILE * SPRITE_SCALE;
+  return {
+    left: -sprite.offsetX / px,
+    top: -sprite.offsetY / px,
+    right: (sprite.widthPx + sprite.offsetX - gridW * px) / px,
+    bottom: (sprite.heightPx + sprite.offsetY - gridH * px) / px,
+  };
+}
+
+function rotatedDims(gridW: number, gridH: number, rot: number): { w: number; h: number } {
+  return (rot === 1 || rot === 3) ? { w: gridH, h: gridW } : { w: gridW, h: gridH };
+}
+
 export function applyFurnitureConfig(config: FurnitureConfig) {
-  furnitureConfig = config;
+  // One-way migration: any leftover `sprite`/`spriteOverrides` are converted to
+  // overhangs in-place and the legacy fields dropped. After the next save the
+  // JSON on disk is clean.
   for (const [id, cfg] of Object.entries(config)) {
     const def = FURNITURE_DEFS[id];
-    if (!def) continue;
-    if (cfg.gridW !== undefined) def.gridW = cfg.gridW;
-    if (cfg.gridH !== undefined) def.gridH = cfg.gridH;
-    if (cfg.spotDx !== undefined) def.spotDx = cfg.spotDx;
-    if (cfg.spotDy !== undefined) def.spotDy = cfg.spotDy;
+    const gridW = cfg.gridW ?? def?.gridW ?? 1;
+    const gridH = cfg.gridH ?? def?.gridH ?? 1;
+    if (cfg.sprite && !cfg.overhang) {
+      cfg.overhang = legacySpriteToOverhang(gridW, gridH, cfg.sprite);
+    }
+    if (cfg.spriteOverrides && !cfg.overhangOverrides) {
+      cfg.overhangOverrides = {};
+      for (const [rotStr, s] of Object.entries(cfg.spriteOverrides)) {
+        const { w, h } = rotatedDims(gridW, gridH, Number(rotStr));
+        cfg.overhangOverrides[rotStr] = legacySpriteToOverhang(w, h, s);
+      }
+    }
+    delete cfg.sprite;
+    delete cfg.spriteOverrides;
+
+    if (def) {
+      if (cfg.gridW !== undefined) def.gridW = cfg.gridW;
+      if (cfg.gridH !== undefined) def.gridH = cfg.gridH;
+      if (cfg.spotDx !== undefined) def.spotDx = cfg.spotDx;
+      if (cfg.spotDy !== undefined) def.spotDy = cfg.spotDy;
+    }
   }
+  furnitureConfig = config;
 }
 
 export function getFurnitureConfig(): FurnitureConfig {
   return furnitureConfig;
 }
 
-export function getSpriteSize(id: string, rot: number): SpriteSize | null {
+export function getOverhang(id: string, rot: number): Overhang | null {
   const cfg = furnitureConfig[id];
   if (!cfg) return null;
-  if (rot !== 0 && cfg.spriteOverrides?.[String(rot)]) return cfg.spriteOverrides[String(rot)];
-  return cfg.sprite ?? null;
+  if (rot !== 0 && cfg.overhangOverrides?.[String(rot)]) return cfg.overhangOverrides[String(rot)];
+  return cfg.overhang ?? null;
+}
+
+export function setOverhang(id: string, rot: number, oh: Overhang) {
+  if (!furnitureConfig[id]) furnitureConfig[id] = {};
+  if (rot === 0) {
+    furnitureConfig[id].overhang = oh;
+  } else {
+    if (!furnitureConfig[id].overhangOverrides) furnitureConfig[id].overhangOverrides = {};
+    furnitureConfig[id].overhangOverrides![String(rot)] = oh;
+  }
+}
+
+// Kept for the old furniture-editor page. New code should use getOverhang.
+export function getSpriteSize(id: string, rot: number): SpriteSize | null {
+  const oh = getOverhang(id, rot);
+  if (!oh) return null;
+  const def = FURNITURE_DEFS[id];
+  if (!def) return null;
+  const { w, h } = rotatedDims(def.gridW, def.gridH, rot);
+  const px = TILE * SPRITE_SCALE;
+  return {
+    widthPx: (w + oh.left + oh.right) * px,
+    heightPx: (h + oh.top + oh.bottom) * px,
+    offsetX: -oh.left * px,
+    offsetY: -oh.top * px,
+  };
 }
 
 export function updateFurnitureConfig(id: string, updates: Partial<FurniturePieceConfig>) {

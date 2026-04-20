@@ -4,9 +4,14 @@ import { join } from 'path';
 
 const CONFIG_FILE = join(process.cwd(), 'lib', 'furniture-config.json');
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   const raw = await readFile(CONFIG_FILE, 'utf-8');
-  return NextResponse.json(JSON.parse(raw));
+  return NextResponse.json(JSON.parse(raw), {
+    headers: { 'Cache-Control': 'no-store, must-revalidate' },
+  });
 }
 
 export async function POST(req: NextRequest) {

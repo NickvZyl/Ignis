@@ -10,9 +10,14 @@ import { useRoomStore } from '@web/stores/room-store';
 import { useSceneStore } from '@web/stores/scene-store';
 import type { SceneId } from '@web/stores/scene-store';
 import FurnitureInventory from '@web/components/FurnitureInventory';
-import { TILE, GRID_W, GRID_H, WALL_ROWS, CEILING_ROWS, GARDEN_WALL_ROWS, BEDROOM_WALL_ROWS, FURNITURE_DEFS, getPixelPos, getSpotPixel, isValidPlacement, buildGrid, DEFAULT_LAYOUT, GARDEN_DEFAULT_LAYOUT, BEDROOM_DEFAULT_LAYOUT, getSpriteSize } from '@web/lib/room-grid';
+import { TILE, GRID_W, GRID_H, WALL_ROWS, CEILING_ROWS, GARDEN_WALL_ROWS, BEDROOM_WALL_ROWS, FURNITURE_DEFS, getPixelPos, getSpotPixel, isValidPlacement, buildGrid, DEFAULT_LAYOUT, GARDEN_DEFAULT_LAYOUT, BEDROOM_DEFAULT_LAYOUT, getOverhang, setOverhang, getFurnitureConfig, updateFurnitureConfig } from '@web/lib/room-grid';
+import type { Overhang } from '@web/lib/room-grid';
+import { api } from '@web/lib/api';
+
+const ADMIN_USER_IDS = (process.env.NEXT_PUBLIC_ADMIN_USER_IDS ?? '')
+  .split(',').map(s => s.trim()).filter(Boolean);
 import type { RoomLayout, CellType, PlacedFurniture } from '@web/lib/room-grid';
-import { registry, setCheckinRemaining, getRotatedDims, drawRotated, glowRotated } from '@web/lib/furniture';
+import { registry, setCheckinRemaining, getRotatedDims, unrotateSpot, drawRotated, glowRotated } from '@web/lib/furniture';
 import type { FurnitureRotation } from '@web/lib/furniture';
 import { findPath, type Point } from '@web/lib/pathfinding';
 import { getGlobalSceneForHour, getScheduleBlockForHour } from '@web/lib/schedule';
@@ -921,6 +926,43 @@ export default function IgnisScene() {
   const { nextCheckinSeconds } = useChatStore();
   const { layout, grid, mode, setMode, moveFurniture, startDrag, endDrag, dragging, draggingRot, cycleDraggingRot, getSpot, placing, placingRot, cyclePlacingRot, addToRoom, removeFromRoom, cancelPlacing, switchSceneLayout, currentScene, configLoaded, initConfig } = useRoomStore();
 
+  // Admin-only in-scene editing tools (inside edit mode): SPOTS and SPRITES.
+  // The two sub-modes are mutually exclusive.
+  const isAdmin = !!userId && ADMIN_USER_IDS.includes(userId);
+  const [spotEditMode, setSpotEditMode] = useState(false);
+  const [spriteEditMode, setSpriteEditMode] = useState(false);
+  const spotDragRef = useRef<{ pieceId: string; offsetX: number; offsetY: number } | null>(null);
+  type SpriteDragMode = 'move' | 'tl' | 'tr' | 'bl' | 'br';
+  const spriteDragRef = useRef<{
+    pieceId: string;
+    rot: number;
+    mode: SpriteDragMode;
+    startOverhang: Overhang;
+    startPx: number;
+    startPy: number;
+    aspect: number; // height / width, for aspect-locked corner scaling
+  } | null>(null);
+  const hitboxDragRef = useRef<{
+    pieceId: string;
+    rot: number;
+    startGridW: number;  // def-space (pre-rotation) values
+    startGridH: number;
+  } | null>(null);
+  useEffect(() => {
+    if (mode !== 'edit') { setSpotEditMode(false); setSpriteEditMode(false); }
+  }, [mode]);
+  const toggleSpotEdit = () => { setSpotEditMode(v => !v); setSpriteEditMode(false); };
+  const toggleSpriteEdit = () => { setSpriteEditMode(v => !v); setSpotEditMode(false); };
+
+  const persistConfig = useCallback(() => {
+    const config = getFurnitureConfig();
+    fetch(api('/api/furniture-config'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    }).catch(() => {});
+  }, []);
+
   // Load furniture config (sprite sizes, grid overrides) on mount
   useEffect(() => { initConfig(); }, [initConfig]);
   const gotoFurniture = useChatStore((s) => s.gotoFurniture);
@@ -1456,27 +1498,29 @@ export default function IgnisScene() {
         if (spriteSrc) {
           const img = getHiResSprite(spriteSrc);
           if (img) {
-            const saved = getSpriteSize(def.id, rot);
+            const oh = getOverhang(def.id, rot);
             const dims = getRotatedDims(def, rot);
-            const gridW = dims.gridW * TILE * SCALE;
-            const gridH = dims.gridH * TILE * SCALE;
-            const gridX = p.x * SCALE;
-            const gridY = p.y * SCALE;
+            const pxT = TILE * SCALE;
+            const hitW = dims.gridW * pxT;
+            const hitH = dims.gridH * pxT;
+            const hitX = p.x * SCALE;
+            const hitY = p.y * SCALE;
 
             let dw: number, dh: number, dx: number, dy: number;
-            if (saved) {
-              // Use saved size and offset from asset sizer tool
-              dw = saved.widthPx;
-              dh = saved.heightPx;
-              dx = gridX + saved.offsetX;
-              dy = gridY + saved.offsetY;
+            if (oh) {
+              // Sprite = hitbox expanded by overhang in each direction.
+              dx = hitX - oh.left * pxT;
+              dy = hitY - oh.top * pxT;
+              dw = hitW + (oh.left + oh.right) * pxT;
+              dh = hitH + (oh.top + oh.bottom) * pxT;
             } else {
-              // Default: fill grid width, maintain aspect, anchor to bottom
+              // No override — aspect-fit the sprite to the hitbox width,
+              // anchored to the hitbox bottom.
               const aspect = img.naturalHeight / img.naturalWidth;
-              dw = gridW;
-              dh = gridW * aspect;
-              dx = gridX;
-              dy = gridY + gridH - dh;
+              dw = hitW;
+              dh = hitW * aspect;
+              dx = hitX;
+              dy = hitY + hitH - dh;
             }
             bgCtx.imageSmoothingEnabled = true;
             bgCtx.imageSmoothingQuality = 'high';
@@ -1552,11 +1596,18 @@ export default function IgnisScene() {
         if (!isBeingDragged) {
           const sp = getSpot(placed.id);
           if (sp) {
-            ctx.globalAlpha = 0.15;
+            const active = spotEditMode;
+            ctx.globalAlpha = active ? 0.25 : 0.15;
             ctx.fillStyle = '#1a0808';
             ctx.fillRect(Math.round(sp.x)-1, Math.round(sp.y)+7, 10, 2);
-            ctx.globalAlpha = 0.35;
-            drawSprite(ctx, IGNIS_FRAMES[0], sp.x, sp.y, emotionColor);
+            ctx.globalAlpha = active ? 0.85 : 0.35;
+            drawSprite(ctx, IGNIS_FRAMES[0], sp.x, sp.y, active ? '#F5D03B' : emotionColor);
+            if (active) {
+              ctx.globalAlpha = 0.9;
+              ctx.strokeStyle = '#F5D03B';
+              ctx.lineWidth = 0.5;
+              ctx.strokeRect(Math.round(sp.x)-0.5, Math.round(sp.y)-0.5, 9, 9);
+            }
             ctx.globalAlpha = 0.6;
             ctx.fillStyle = '#fff';
             ctx.font = '3px monospace';
@@ -1567,6 +1618,58 @@ export default function IgnisScene() {
       }
 
       ctx.globalAlpha = 1;
+
+      // Sprite-edit overlay: draw each piece's current sprite rectangle with
+      // big corner handles that scale the sprite with aspect lock.
+      if (spriteEditMode) {
+        for (const placed of layout.furniture) {
+          const def = FURNITURE_DEFS[placed.id];
+          if (!def?.hiResSprites) continue;
+          const rot = placed.rot ?? 0;
+          const dims = getRotatedDims(def, rot);
+          const oh = getOverhang(placed.id, rot) ?? { top: 0, right: 0, bottom: 0, left: 0 };
+          const rx = (placed.gx - oh.left) * TILE;
+          const ry = (placed.gy - oh.top) * TILE;
+          const rw = (dims.gridW + oh.left + oh.right) * TILE;
+          const rh = (dims.gridH + oh.top + oh.bottom) * TILE;
+
+          const isBeingDragged = spriteDragRef.current?.pieceId === placed.id;
+          const stroke = isBeingDragged ? '#F5D03B' : '#06B6D4';
+
+          // Sprite bounds outline.
+          ctx.strokeStyle = stroke;
+          ctx.lineWidth = 0.5;
+          ctx.setLineDash([1, 1]);
+          ctx.strokeRect(rx + 0.25, ry + 0.25, rw - 0.5, rh - 0.5);
+          ctx.setLineDash([]);
+
+          // Corner handles: 3×3 internal px (12×12 display) so they're
+          // clearly grabbable.
+          const H = 3;
+          const corners: Array<[number, number]> = [
+            [rx,      ry     ],
+            [rx + rw, ry     ],
+            [rx,      ry + rh],
+            [rx + rw, ry + rh],
+          ];
+          for (const [cx, cy] of corners) {
+            ctx.fillStyle = stroke;
+            ctx.fillRect(cx - H / 2, cy - H / 2, H, H);
+            ctx.fillStyle = '#0a0604';
+            ctx.fillRect(cx - H / 2 + 1, cy - H / 2 + 1, H - 2, H - 2);
+          }
+
+          // Hitbox BR handle (blue) — drag to resize the piece's grid
+          // footprint. Distinct color from sprite handles so it's unambiguous.
+          const hbrX = (placed.gx + dims.gridW) * TILE;
+          const hbrY = (placed.gy + dims.gridH) * TILE;
+          const hbActive = hitboxDragRef.current?.pieceId === placed.id;
+          ctx.fillStyle = hbActive ? '#F5D03B' : '#4A90D9';
+          ctx.fillRect(hbrX - H / 2, hbrY - H / 2, H, H);
+          ctx.fillStyle = '#0a0604';
+          ctx.fillRect(hbrX - H / 2 + 1, hbrY - H / 2 + 1, H - 2, H - 2);
+        }
+      }
 
       // Placement ghost from inventory
       if (placing && placementCursorRef.current) {
@@ -1677,7 +1780,7 @@ export default function IgnisScene() {
     }
 
     animRef.current = requestAnimationFrame(loop);
-  }, [emotion, role, weather, layout, grid, mode, dragging, draggingRot, placing, placingRot, getSpot]);
+  }, [emotion, role, weather, layout, grid, mode, dragging, draggingRot, placing, placingRot, getSpot, spotEditMode, spriteEditMode]);
 
   useEffect(() => {
     animRef.current = requestAnimationFrame(loop);
@@ -1745,6 +1848,97 @@ export default function IgnisScene() {
     }
 
     if (mode === 'edit') {
+      // Spot-edit: grab nearest ghost Ignis sprite and drag its spot.
+      // Runs before furniture drag so spots inside a piece's hitbox still work.
+      // Record cursor offset from sprite top-left so snap doesn't pull the
+      // sprite away from where the user grabbed it.
+      if (spotEditMode) {
+        for (const placed of layout.furniture) {
+          const sp = getSpot(placed.id);
+          if (!sp) continue;
+          if (px >= sp.x - 2 && px <= sp.x + 10 && py >= sp.y - 2 && py <= sp.y + 10) {
+            spotDragRef.current = { pieceId: placed.id, offsetX: px - sp.x, offsetY: py - sp.y };
+            e.preventDefault();
+            return;
+          }
+        }
+      }
+
+      // Sprite-edit: drag corners to scale with aspect lock, or body to move.
+      if (spriteEditMode) {
+        const CORNER = 2.5; // corner hit zone radius in internal px
+        // Pass 0 — hitbox BR corner. Priority over sprite corners so the user
+        // can always resize the hitbox even when sprite overhang is 0.
+        for (const placed of layout.furniture) {
+          const def = FURNITURE_DEFS[placed.id];
+          if (!def?.hiResSprites) continue;
+          const rot = placed.rot ?? 0;
+          const dims = getRotatedDims(def, rot);
+          const hx = (placed.gx + dims.gridW) * TILE;
+          const hy = (placed.gy + dims.gridH) * TILE;
+          if (Math.abs(px - hx) <= CORNER && Math.abs(py - hy) <= CORNER) {
+            hitboxDragRef.current = {
+              pieceId: placed.id, rot,
+              startGridW: def.gridW, startGridH: def.gridH,
+            };
+            e.preventDefault();
+            return;
+          }
+        }
+        // Pass 1 — corner handles (priority, so corners always win over body).
+        for (const placed of layout.furniture) {
+          const def = FURNITURE_DEFS[placed.id];
+          if (!def?.hiResSprites) continue;
+          const rot = placed.rot ?? 0;
+          const dims = getRotatedDims(def, rot);
+          const oh = getOverhang(placed.id, rot) ?? { top: 0, right: 0, bottom: 0, left: 0 };
+          const rx = (placed.gx - oh.left) * TILE;
+          const ry = (placed.gy - oh.top) * TILE;
+          const rw = (dims.gridW + oh.left + oh.right) * TILE;
+          const rh = (dims.gridH + oh.top + oh.bottom) * TILE;
+
+          const corners: Array<[SpriteDragMode, number, number]> = [
+            ['tl', rx,      ry     ],
+            ['tr', rx + rw, ry     ],
+            ['bl', rx,      ry + rh],
+            ['br', rx + rw, ry + rh],
+          ];
+          for (const [cMode, cx, cy] of corners) {
+            if (Math.abs(px - cx) <= CORNER && Math.abs(py - cy) <= CORNER) {
+              const src = def.hiResSprites[rot] || def.hiResSprites[0];
+              const img = src ? getHiResSprite(src) : null;
+              const aspect = img && img.naturalWidth ? img.naturalHeight / img.naturalWidth : 1;
+              spriteDragRef.current = {
+                pieceId: placed.id, rot, mode: cMode,
+                startOverhang: { ...oh }, startPx: px, startPy: py, aspect,
+              };
+              e.preventDefault();
+              return;
+            }
+          }
+        }
+        // Pass 2 — body drag (move). Skip anywhere a corner was close.
+        for (const placed of layout.furniture) {
+          const def = FURNITURE_DEFS[placed.id];
+          if (!def?.hiResSprites) continue;
+          const rot = placed.rot ?? 0;
+          const dims = getRotatedDims(def, rot);
+          const oh = getOverhang(placed.id, rot) ?? { top: 0, right: 0, bottom: 0, left: 0 };
+          const rx = (placed.gx - oh.left) * TILE;
+          const ry = (placed.gy - oh.top) * TILE;
+          const rw = (dims.gridW + oh.left + oh.right) * TILE;
+          const rh = (dims.gridH + oh.top + oh.bottom) * TILE;
+          if (px >= rx && px <= rx + rw && py >= ry && py <= ry + rh) {
+            spriteDragRef.current = {
+              pieceId: placed.id, rot, mode: 'move',
+              startOverhang: { ...oh }, startPx: px, startPy: py, aspect: 1,
+            };
+            e.preventDefault();
+            return;
+          }
+        }
+      }
+
       // Placing from inventory
       if (placingRef.current && placementCursorRef.current) {
         const { gx: pgx, gy: pgy } = placementCursorRef.current;
@@ -1782,13 +1976,93 @@ export default function IgnisScene() {
       }
     }
 
-  }, [mode, layout, getSpot, startDrag, addToRoom, removeFromRoom, mouseToPixel, switchScene]);
+  }, [mode, layout, getSpot, startDrag, addToRoom, removeFromRoom, mouseToPixel, switchScene, spotEditMode, spriteEditMode]);
 
   // Unified mouse move
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { px, py, gx, gy } = mouseToPixel(e);
 
     if (mode === 'edit') {
+      if (spotDragRef.current) {
+        const { pieceId, offsetX, offsetY } = spotDragRef.current;
+        const placed = layout.furniture.find(f => f.id === pieceId);
+        const def = placed && FURNITURE_DEFS[pieceId];
+        if (placed && def) {
+          // Preserve grab offset so sprite tracks cursor exactly.
+          // Drag happens in the rotated coord frame — inverse-rotate before
+          // writing to the rot=0 spotDx/spotDy on the def.
+          const rotDx = (px - offsetX) / TILE - placed.gx;
+          const rotDy = (py - offsetY) / TILE - placed.gy;
+          const { spotDx, spotDy } = unrotateSpot(def, placed.rot ?? 0, rotDx, rotDy);
+          updateFurnitureConfig(pieceId, {
+            spotDx: Math.round(spotDx * 4) / 4,
+            spotDy: Math.round(spotDy * 4) / 4,
+          });
+        }
+        e.preventDefault();
+        return;
+      }
+      if (hitboxDragRef.current) {
+        const drag = hitboxDragRef.current;
+        const placed = layout.furniture.find(f => f.id === drag.pieceId);
+        if (!placed) { e.preventDefault(); return; }
+        // Desired display-grid size in whole tiles, clamped to ≥1.
+        const newDispW = Math.max(1, Math.round(px / TILE - placed.gx));
+        const newDispH = Math.max(1, Math.round(py / TILE - placed.gy));
+        // For rot 1/3 the display axes are swapped relative to def axes.
+        const rotated = drag.rot === 1 || drag.rot === 3;
+        const nextGridW = rotated ? newDispH : newDispW;
+        const nextGridH = rotated ? newDispW : newDispH;
+        updateFurnitureConfig(drag.pieceId, { gridW: nextGridW, gridH: nextGridH });
+        e.preventDefault();
+        return;
+      }
+      if (spriteDragRef.current) {
+        const drag = spriteDragRef.current;
+        const placed = layout.furniture.find(f => f.id === drag.pieceId);
+        const def = placed && FURNITURE_DEFS[drag.pieceId];
+        if (!placed || !def) { e.preventDefault(); return; }
+        const dims = getRotatedDims(def, drag.rot as FurnitureRotation);
+        const oh0 = drag.startOverhang;
+        const snap = (v: number) => Math.round(v * 4) / 4; // 0.25-tile quantum
+
+        if (drag.mode === 'move') {
+          const dTileX = (px - drag.startPx) / TILE;
+          const dTileY = (py - drag.startPy) / TILE;
+          setOverhang(drag.pieceId, drag.rot, {
+            left:   snap(oh0.left   - dTileX),
+            right:  snap(oh0.right  + dTileX),
+            top:    snap(oh0.top    - dTileY),
+            bottom: snap(oh0.bottom + dTileY),
+          });
+        } else {
+          // Corner drag: aspect-locked scale. Opposite corner stays fixed.
+          // Width is driven by the cursor's horizontal distance from the
+          // anchor; height is derived from natural aspect.
+          const gridW = dims.gridW, gridH = dims.gridH;
+          let anchorX: number, signX: 1 | -1, signY: 1 | -1;
+          switch (drag.mode) {
+            case 'br': anchorX = placed.gx - oh0.left;            signX = 1;  signY = 1;  break;
+            case 'bl': anchorX = placed.gx + gridW + oh0.right;   signX = -1; signY = 1;  break;
+            case 'tr': anchorX = placed.gx - oh0.left;            signX = 1;  signY = -1; break;
+            case 'tl': anchorX = placed.gx + gridW + oh0.right;   signX = -1; signY = -1; break;
+            default: e.preventDefault(); return;
+          }
+          const cursorTileX = px / TILE;
+          const widthTiles = Math.max(0.5, (cursorTileX - anchorX) * signX);
+          const heightTiles = widthTiles * drag.aspect;
+
+          const next: Overhang = { ...oh0 };
+          if (signX === 1)  next.right  = snap(widthTiles - gridW - oh0.left);
+          else              next.left   = snap(widthTiles - gridW - oh0.right);
+          if (signY === 1)  next.bottom = snap(heightTiles - gridH - oh0.top);
+          else              next.top    = snap(heightTiles - gridH - oh0.bottom);
+
+          setOverhang(drag.pieceId, drag.rot, next);
+        }
+        e.preventDefault();
+        return;
+      }
       if (draggingRef.current) {
         const def = FURNITURE_DEFS[draggingRef.current];
         if (def) {
@@ -1817,6 +2091,27 @@ export default function IgnisScene() {
   const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { px, py } = mouseToPixel(e);
 
+    if (mode === 'edit' && spotDragRef.current) {
+      spotDragRef.current = null;
+      persistConfig();
+      return;
+    }
+
+    if (mode === 'edit' && spriteDragRef.current) {
+      spriteDragRef.current = null;
+      persistConfig();
+      return;
+    }
+
+    if (mode === 'edit' && hitboxDragRef.current) {
+      hitboxDragRef.current = null;
+      // Hitbox changed — rebuild the collision grid so the new footprint is
+      // respected for pathfinding and placement.
+      useRoomStore.setState({ grid: buildGrid(layout, SCENE_WALL_ROWS[currentScene]) });
+      persistConfig();
+      return;
+    }
+
     if (mode === 'edit' && draggingRef.current && furnitureDragRef.current) {
       const { gx, gy } = furnitureDragRef.current;
       moveFurniture(draggingRef.current, gx, gy);
@@ -1824,7 +2119,7 @@ export default function IgnisScene() {
       endDrag();
     }
 
-  }, [mode, layout, moveFurniture, endDrag, mouseToPixel]);
+  }, [mode, layout, moveFurniture, endDrag, mouseToPixel, persistConfig]);
 
   // R key to cycle rotation while dragging or placing
   useEffect(() => {
@@ -1876,8 +2171,8 @@ export default function IgnisScene() {
           height={H*SCALE}
           className="absolute pointer-events-none"
         />
-        {/* Loading spinner while hi-res assets load */}
-        {!assetsReady && (
+        {/* Loading spinner while hi-res assets or the furniture config load */}
+        {(!assetsReady || !configLoaded) && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ background: '#1a0e08', zIndex: 15 }}>
             <div style={{
               width: 24, height: 24,
@@ -1909,8 +2204,38 @@ export default function IgnisScene() {
           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-2 items-center">
             <div className="px-3 py-1 rounded text-[8px] tracking-wider"
               style={{ fontFamily: menuFont, background: 'rgba(0,0,0,0.7)', color: '#888' }}>
-              DRAG TO MOVE · R TO ROTATE
+              {spotEditMode
+                ? 'DRAG IGNIS TO SET SPOT'
+                : spriteEditMode
+                ? 'DRAG CORNERS TO SCALE · BODY TO MOVE'
+                : 'DRAG TO MOVE · R TO ROTATE'}
             </div>
+            {isAdmin && (
+              <>
+                <button
+                  onClick={toggleSpotEdit}
+                  className="px-3 py-1 rounded text-[8px] tracking-wider"
+                  style={{
+                    fontFamily: menuFont,
+                    background: spotEditMode ? '#F5D03B' : 'rgba(0,0,0,0.7)',
+                    color: spotEditMode ? '#1a0e08' : '#F5D03B',
+                    border: '1px solid #F5D03B', cursor: 'pointer',
+                  }}>
+                  SPOTS
+                </button>
+                <button
+                  onClick={toggleSpriteEdit}
+                  className="px-3 py-1 rounded text-[8px] tracking-wider"
+                  style={{
+                    fontFamily: menuFont,
+                    background: spriteEditMode ? '#06B6D4' : 'rgba(0,0,0,0.7)',
+                    color: spriteEditMode ? '#1a0e08' : '#06B6D4',
+                    border: '1px solid #06B6D4', cursor: 'pointer',
+                  }}>
+                  SPRITES
+                </button>
+              </>
+            )}
             <button
               onClick={() => setMode('live')}
               className="px-3 py-1 rounded text-[8px] tracking-wider"

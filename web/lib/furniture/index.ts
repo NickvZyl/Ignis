@@ -32,4 +32,4 @@ import './pieces/bedroom_window';
 export { registry } from './registry';
 export type { FurnitureDef, FurnitureCategory, FurnitureDrawFn, FurnitureGlowFn, FurnitureRotation } from './types';
 export { setCheckinRemaining } from './pieces/clock_table';
-export { getRotatedDims, getRotatedSpot, drawRotated, glowRotated } from './rotation';
+export { getRotatedDims, getRotatedSpot, unrotateSpot, drawRotated, glowRotated } from './rotation';

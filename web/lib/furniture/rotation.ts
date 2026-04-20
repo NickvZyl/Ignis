@@ -28,6 +28,24 @@ export function getRotatedSpot(def: FurnitureDef, rot: FurnitureRotation): { spo
   };
 }
 
+// Inverse of getRotatedSpot: given a spot in the rotated piece's coord frame,
+// return the rot=0 spotDx/spotDy to store on the def.
+export function unrotateSpot(def: FurnitureDef, rot: FurnitureRotation, rotSpotDx: number, rotSpotDy: number): { spotDx: number; spotDy: number } {
+  if (rot === 0) return { spotDx: rotSpotDx, spotDy: rotSpotDy };
+
+  const W = def.gridW, H = def.gridH;
+  const { gridW: nW, gridH: nH } = getRotatedDims(def, rot);
+  let rx = rotSpotDx - nW / 2;
+  let ry = rotSpotDy - nH / 2;
+
+  // Inverse of CW: apply 90° CCW rotation: (x, y) -> (y, -x)
+  for (let i = 0; i < rot; i++) {
+    [rx, ry] = [ry, -rx];
+  }
+
+  return { spotDx: rx + W / 2, spotDy: ry + H / 2 };
+}
+
 export function drawRotated(
   ctx: CanvasRenderingContext2D,
   drawFn: FurnitureDrawFn,

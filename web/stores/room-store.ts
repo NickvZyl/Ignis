@@ -228,58 +228,21 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   configLoaded: false,
 
   initConfig: async () => {
-    if (get().configLoaded) return;
+    // Always re-fetch on mount so changes saved by /dev/scale or the
+    // furniture editor show up without a full page reload.
+    // `no-store` so the browser doesn't serve a stale cached response.
     try {
-      const res = await fetch(api('/api/furniture-config'));
+      const res = await fetch(api('/api/furniture-config'), { cache: 'no-store' });
       if (res.ok) {
         const config: FurnitureConfig = await res.json();
 
-        // Migrate localStorage overrides into config if present
-        let needsSave = false;
+        // Sweep stale localStorage keys from older resize tools. These used to
+        // be re-injected here as legacy sprite fields, which would stomp
+        // overhang edits from /dev/scale on the next /app mount — not anymore.
         try {
-          const legacyGridSizes = localStorage.getItem('ignis_grid_sizes');
-          if (legacyGridSizes) {
-            const parsed = JSON.parse(legacyGridSizes);
-            for (const [id, size] of Object.entries(parsed)) {
-              const s = size as { gridW: number; gridH: number };
-              if (!config[id]) config[id] = {};
-              if (config[id].gridW === undefined) config[id].gridW = s.gridW;
-              if (config[id].gridH === undefined) config[id].gridH = s.gridH;
-            }
-            localStorage.removeItem('ignis_grid_sizes');
-            needsSave = true;
-          }
-
-          const legacyAssetSizes = localStorage.getItem('ignis_asset_sizes');
-          if (legacyAssetSizes) {
-            const parsed = JSON.parse(legacyAssetSizes);
-            for (const [key, size] of Object.entries(parsed)) {
-              const s = size as { widthPx: number; heightPx: number; offsetX: number; offsetY: number };
-              // Parse keys like "desk_r0", "couch_r1"
-              const match = key.match(/^(.+)_r(\d+)$/);
-              if (!match) continue;
-              const [, id, rotStr] = match;
-              const rot = parseInt(rotStr);
-              if (!config[id]) config[id] = {};
-              if (rot === 0) {
-                if (!config[id].sprite) config[id].sprite = s;
-              } else {
-                if (!config[id].spriteOverrides) config[id].spriteOverrides = {};
-                if (!config[id].spriteOverrides![String(rot)]) config[id].spriteOverrides![String(rot)] = s;
-              }
-            }
-            localStorage.removeItem('ignis_asset_sizes');
-            needsSave = true;
-          }
+          localStorage.removeItem('ignis_grid_sizes');
+          localStorage.removeItem('ignis_asset_sizes');
         } catch {}
-
-        if (needsSave) {
-          fetch(api('/api/furniture-config'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(config),
-          }).catch(() => {});
-        }
 
         applyFurnitureConfig(config);
         const { layout, currentScene } = get();
@@ -292,7 +255,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   reloadConfig: async () => {
     try {
-      const res = await fetch(api('/api/furniture-config'));
+      const res = await fetch(api('/api/furniture-config'), { cache: 'no-store' });
       if (res.ok) {
         const config: FurnitureConfig = await res.json();
         applyFurnitureConfig(config);

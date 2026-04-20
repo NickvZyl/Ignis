@@ -1,47 +1,73 @@
 'use client';
 
+// Visual sprite-resize tool. Drag the sprite rectangle or its corners to size
+// each piece relative to its hitbox. Storage lives in furniture-config.json as
+// overhangs (tile-relative), the same source of truth as /dev/scale.
+
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { registry } from '@web/lib/furniture';
 import type { FurnitureDef } from '@web/lib/furniture/types';
+import { getOverhang, setOverhang, applyFurnitureConfig, getFurnitureConfig } from '@web/lib/room-grid';
+import type { Overhang } from '@web/lib/room-grid';
+import { api } from '@web/lib/api';
 
 const W = 192, H = 160, SCALE = 4, TILE = 8;
 const DW = W * SCALE, DH = H * SCALE;
+const PXT = TILE * SCALE;
 const WALL_END = 64;
 
-const ASSET_SIZES_KEY = 'ignis_asset_sizes';
-const GRID_SIZES_KEY = 'ignis_grid_sizes';
 const ROT_LABELS: Record<number, string> = { 0: 'Front', 1: 'Right', 2: 'Back', 3: 'Left' };
 
-interface AssetSize { widthPx: number; heightPx: number; offsetX: number; offsetY: number; }
-interface GridSize { gridW: number; gridH: number; }
-
-function loadMap<T>(key: string): Record<string, T> {
-  try { return JSON.parse(localStorage.getItem(key) || '{}'); } catch { return {}; }
-}
-function saveMap(key: string, data: Record<string, unknown>) {
-  localStorage.setItem(key, JSON.stringify(data));
-}
-
 type DragMode = null | 'move' | 'tl' | 'tr' | 'bl' | 'br';
+
+// Visual sprite rectangle (in display pixels, relative to canvas) derived from overhang + hitbox.
+interface SpriteRect { widthPx: number; heightPx: number; offsetX: number; offsetY: number; }
+
+function overhangToSprite(gridW: number, gridH: number, oh: Overhang): SpriteRect {
+  return {
+    widthPx: (gridW + oh.left + oh.right) * PXT,
+    heightPx: (gridH + oh.top + oh.bottom) * PXT,
+    offsetX: -oh.left * PXT,
+    offsetY: -oh.top * PXT,
+  };
+}
+
+function spriteToOverhang(gridW: number, gridH: number, s: SpriteRect): Overhang {
+  return {
+    left: -s.offsetX / PXT,
+    top: -s.offsetY / PXT,
+    right: (s.widthPx + s.offsetX - gridW * PXT) / PXT,
+    bottom: (s.heightPx + s.offsetY - gridH * PXT) / PXT,
+  };
+}
+
+function rotatedHitbox(def: FurnitureDef, rot: number): { gridW: number; gridH: number } {
+  if (rot === 1 || rot === 3) return { gridW: def.gridH, gridH: def.gridW };
+  return { gridW: def.gridW, gridH: def.gridH };
+}
 
 export default function ResizePage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [defs, setDefs] = useState<FurnitureDef[]>([]);
   const [sel, setSel] = useState<string | null>(null);
   const [rot, setRot] = useState(0);
-  const [assets, setAssets] = useState<Record<string, AssetSize>>(() => loadMap(ASSET_SIZES_KEY));
-  const [grids, setGrids] = useState<Record<string, GridSize>>(() => loadMap(GRID_SIZES_KEY));
   const [imgs, setImgs] = useState<Record<string, HTMLImageElement>>({});
   const [bgImgs, setBgImgs] = useState<Record<string, HTMLImageElement>>({});
   const [drag, setDrag] = useState<DragMode>(null);
-  const [dirty, setDirty] = useState(false);
+  const [status, setStatus] = useState<string>('');
+  const [loaded, setLoaded] = useState(false);
   const ds = useRef({ mx: 0, my: 0, s: { widthPx: 0, heightPx: 0, offsetX: 0, offsetY: 0 } });
   const [, setTick] = useState(0);
   const redraw = () => setTick(t => t + 1);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Load config + piece list.
   useEffect(() => {
-    setDefs(registry.getAllDefs().filter(d => d.hiResSprites));
-    for (const [k, src] of Object.entries({ room: '/room-bg.png', garden: '/garden-bg.png' })) {
+    fetch(api('/api/furniture-config'), { cache: 'no-store' })
+      .then(r => r.json())
+      .then((cfg) => { applyFurnitureConfig(cfg); setLoaded(true); setDefs(registry.getAllDefs().filter(d => d.hiResSprites)); })
+      .catch(() => { setLoaded(true); setDefs(registry.getAllDefs().filter(d => d.hiResSprites)); });
+    for (const [k, src] of Object.entries({ room: '/room-bg.png', garden: '/garden-bg.png', bedroom: '/bedroom-bg.png' })) {
       const img = new Image(); img.src = src;
       img.onload = () => setBgImgs(p => ({ ...p, [k]: img }));
     }
@@ -51,14 +77,12 @@ export default function ResizePage() {
   const availableRots = def?.hiResSprites ? Object.keys(def.hiResSprites).map(Number).sort() : [];
   const spriteSrc = def?.hiResSprites?.[rot] as string | undefined;
 
-  // Load sprite images
   useEffect(() => {
     if (!spriteSrc || imgs[spriteSrc]) return;
     const img = new Image(); img.src = spriteSrc;
     img.onload = () => setImgs(p => ({ ...p, [spriteSrc]: img }));
   }, [spriteSrc]);
 
-  // Preload all rotations
   useEffect(() => {
     if (!def?.hiResSprites) return;
     for (const src of Object.values(def.hiResSprites) as string[]) {
@@ -72,81 +96,57 @@ export default function ResizePage() {
   const img = spriteSrc ? imgs[spriteSrc] : null;
   const bg = bgImgs[(def?.scene ?? 'room') as string];
 
-  // Keys: sprite size is per-rotation, grid size is per-piece (one hitbox for all rotations)
-  const sizeKey = def ? `${def.id}_r${rot}` : '';
-  const gridSizeKey = def ? def.id : ''; // per-piece, matches what room-grid.ts reads
-
-  const grid = def ? (grids[gridSizeKey] || { gridW: def.gridW, gridH: def.gridH }) : { gridW: 1, gridH: 1 };
-  const gpw = grid.gridW * TILE * SCALE;
-  const gph = grid.gridH * TILE * SCALE;
+  const hitbox = def ? rotatedHitbox(def, rot) : { gridW: 1, gridH: 1 };
+  const gpw = hitbox.gridW * PXT;
+  const gph = hitbox.gridH * PXT;
   const ax = Math.floor(DW / 2 - gpw / 2);
   const ay = WALL_END * SCALE;
 
-  const getSprite = useCallback((): AssetSize => {
-    if (sizeKey && assets[sizeKey]) return assets[sizeKey];
-    if (!img) return { widthPx: gpw, heightPx: gph, offsetX: 0, offsetY: 0 };
-    // Default: fit within canvas, visible and usable
-    const aspect = img.naturalHeight / img.naturalWidth;
-    const maxW = DW * 0.45;
-    const maxH = DH * 0.55;
-    let w = maxW, h = w * aspect;
-    if (h > maxH) { h = maxH; w = h / aspect; }
-    return { widthPx: w, heightPx: h, offsetX: (gpw - w) / 2, offsetY: gph - h };
-  }, [sizeKey, assets, img, gpw, gph]);
-
-  const sprite = getSprite();
+  const currentOverhang: Overhang = def
+    ? (getOverhang(def.id, rot) ?? { top: 0, right: 0, bottom: 0, left: 0 })
+    : { top: 0, right: 0, bottom: 0, left: 0 };
+  const sprite: SpriteRect = def
+    ? overhangToSprite(hitbox.gridW, hitbox.gridH, currentOverhang)
+    : { widthPx: gpw, heightPx: gph, offsetX: 0, offsetY: 0 };
   const sx = ax + sprite.offsetX;
   const sy = ay + sprite.offsetY;
 
-  // === SAVE ===
-  const handleSave = useCallback(() => {
-    saveMap(ASSET_SIZES_KEY, assets);
-    saveMap(GRID_SIZES_KEY, grids);
-    setDirty(false);
-  }, [assets, grids]);
+  const scheduleSave = useCallback(() => {
+    setStatus('Editing…');
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      const res = await fetch(api('/api/furniture-config'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getFurnitureConfig()),
+      });
+      setStatus(res.ok ? 'Saved' : 'Save failed');
+      setTimeout(() => setStatus(''), 1500);
+    }, 400);
+  }, []);
 
-  const updateSprite = useCallback((newSize: AssetSize) => {
-    // Save to current rotation + mirror (left<->right)
-    const mirrorRot = rot === 1 ? 3 : rot === 3 ? 1 : -1;
-    const updated = { ...assets, [sizeKey]: newSize };
-    if (mirrorRot >= 0 && def) updated[`${def.id}_r${mirrorRot}`] = newSize;
-    setAssets(updated);
-    setDirty(true);
-    redraw();
-  }, [assets, sizeKey, rot, def]);
-
-  const updateGrid = useCallback((newG: GridSize) => {
-    const updated = { ...grids, [gridSizeKey]: newG };
-    setGrids(updated);
-    setDirty(true);
-    redraw();
-  }, [grids, gridSizeKey]);
-
-  // === SYNC ALL ROTATIONS ===
-  const syncAllRotations = useCallback(() => {
-    if (!def || !img || !def.hiResSprites) return;
-    const currentSize = getSprite();
-    const isFB = rot === 0 || rot === 2;
-    const currentLenSrc = isFB ? img.naturalWidth : img.naturalHeight;
-    const currentLenRendered = isFB ? currentSize.widthPx : currentSize.heightPx;
-    const scale = currentLenRendered / currentLenSrc;
-
-    const updated = { ...assets };
-    for (const [rStr, src] of Object.entries(def.hiResSprites)) {
-      const r = Number(rStr);
-      const cachedImg = imgs[src as string];
-      if (!cachedImg) continue;
-      const rIsFB = r === 0 || r === 2;
-      const rLenSrc = rIsFB ? cachedImg.naturalWidth : cachedImg.naturalHeight;
-      const rScale = (scale * currentLenSrc) / rLenSrc;
-      const w = cachedImg.naturalWidth * rScale;
-      const h = cachedImg.naturalHeight * rScale;
-      updated[`${def.id}_r${r}`] = { widthPx: w, heightPx: h, offsetX: (gpw - w) / 2, offsetY: gph - h };
+  // Flush pending save on unmount.
+  useEffect(() => () => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      fetch(api('/api/furniture-config'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(getFurnitureConfig()),
+      }).catch(() => {});
     }
-    setAssets(updated);
-    setDirty(true);
+  }, []);
+
+  const commitSprite = useCallback((s: SpriteRect) => {
+    if (!def) return;
+    const oh = spriteToOverhang(hitbox.gridW, hitbox.gridH, s);
+    setOverhang(def.id, rot, oh);
+    // Mirror left<->right rotations so the sprite looks consistent without re-tuning.
+    const mirror = rot === 1 ? 3 : rot === 3 ? 1 : null;
+    if (mirror !== null) setOverhang(def.id, mirror, oh);
     redraw();
-  }, [def, img, rot, assets, imgs, gpw, gph, getSprite]);
+    scheduleSave();
+  }, [def, rot, hitbox.gridW, hitbox.gridH, scheduleSave]);
 
   // === DRAW ===
   useEffect(() => {
@@ -175,14 +175,12 @@ export default function ResizePage() {
     ctx.strokeRect(ax, ay, gpw, gph);
     ctx.setLineDash([]);
     ctx.fillStyle = '#F5D03B'; ctx.font = '9px monospace'; ctx.textAlign = 'center';
-    ctx.fillText(`Hitbox ${grid.gridW}×${grid.gridH}`, ax + gpw / 2, ay + gph + 14);
+    ctx.fillText(`Hitbox ${hitbox.gridW}×${hitbox.gridH}`, ax + gpw / 2, ay + gph + 14);
 
     // Sprite image
     if (img) {
       ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, sx, sy, sprite.widthPx, sprite.heightPx);
-
-      // Blue outline + corner handles
       ctx.strokeStyle = '#06B6D4'; ctx.lineWidth = 2;
       ctx.strokeRect(sx, sy, sprite.widthPx, sprite.heightPx);
       const HS = 10;
@@ -195,12 +193,12 @@ export default function ResizePage() {
     // Info bar
     ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0, 0, DW, 24);
     ctx.fillStyle = '#fff'; ctx.font = '11px monospace'; ctx.textAlign = 'left';
-    ctx.fillText(`${def.label} [${ROT_LABELS[rot] ?? rot}]  |  ${Math.round(sprite.widthPx)}×${Math.round(sprite.heightPx)}  |  Hitbox: ${grid.gridW}×${grid.gridH}`, 8, 16);
+    ctx.fillText(`${def.label} [${ROT_LABELS[rot] ?? rot}]  |  ${Math.round(sprite.widthPx)}×${Math.round(sprite.heightPx)}  |  Hitbox: ${hitbox.gridW}×${hitbox.gridH}`, 8, 16);
 
-    // Dirty indicator
-    if (dirty) {
-      ctx.fillStyle = '#F59E0B'; ctx.textAlign = 'right';
-      ctx.fillText('● UNSAVED', DW - 8, 16);
+    if (status) {
+      ctx.fillStyle = status === 'Saved' ? '#06B6D4' : '#F59E0B';
+      ctx.textAlign = 'right';
+      ctx.fillText(status, DW - 8, 16);
     }
   });
 
@@ -240,8 +238,8 @@ export default function ResizePage() {
     else if (drag === 'tl') { newW = Math.max(24, o.widthPx - dx); newOX = o.offsetX + (o.widthPx - newW); newOY = o.offsetY + (o.heightPx - newW * aspect); }
 
     const newH = drag === 'move' ? o.heightPx : newW * aspect;
-    updateSprite({ widthPx: newW, heightPx: newH, offsetX: newOX, offsetY: newOY });
-  }, [drag, def, img, updateSprite]);
+    commitSprite({ widthPx: newW, heightPx: newH, offsetX: newOX, offsetY: newOY });
+  }, [drag, def, img, commitSprite]);
 
   const handleUp = useCallback(() => setDrag(null), []);
 
@@ -255,11 +253,22 @@ export default function ResizePage() {
     border: 'none', cursor: 'pointer', textAlign: 'left', background: bg, color,
   });
 
+  const resetPiece = () => {
+    if (!def) return;
+    setOverhang(def.id, rot, { top: 0, right: 0, bottom: 0, left: 0 });
+    redraw();
+    scheduleSave();
+  };
+
+  if (!loaded) {
+    return <div style={{ padding: 24, color: '#e6d0b8', fontFamily: 'monospace' }}>Loading…</div>;
+  }
+
   return (
     <div style={{ background: '#0a0a0e', minHeight: '100vh', color: '#e0e0e0', padding: 20 }}>
       <div style={{ fontFamily: F, fontSize: 14, marginBottom: 6, color: '#F59E0B' }}>Resize Tool</div>
       <div style={{ fontSize: 11, color: '#888', marginBottom: 12 }}>
-        Drag image to move, corners to resize. Use inputs for precise values. Hit SAVE when done.
+        Drag image to move, corners to resize. Auto-saves to furniture-config.json.
       </div>
 
       <div style={{ display: 'flex', gap: 16 }}>
@@ -286,54 +295,39 @@ export default function ResizePage() {
             <div style={{ marginTop: 14, fontFamily: F, fontSize: 7, color: '#06B6D4' }}>SPRITE</div>
             <NumInput label="W" value={Math.round(sprite.widthPx)} onChange={v => {
               const a = img ? img.naturalHeight / img.naturalWidth : 1;
-              updateSprite({ widthPx: v, heightPx: v * a, offsetX: sprite.offsetX, offsetY: sprite.offsetY });
+              commitSprite({ widthPx: v, heightPx: v * a, offsetX: sprite.offsetX, offsetY: sprite.offsetY });
             }} />
             <NumInput label="H" value={Math.round(sprite.heightPx)} onChange={v => {
               const a = img ? img.naturalHeight / img.naturalWidth : 1;
-              updateSprite({ widthPx: v / a, heightPx: v, offsetX: sprite.offsetX, offsetY: sprite.offsetY });
+              commitSprite({ widthPx: v / a, heightPx: v, offsetX: sprite.offsetX, offsetY: sprite.offsetY });
             }} />
-            <NumInput label="X" value={Math.round(sprite.offsetX)} onChange={v => updateSprite({ ...sprite, offsetX: v })} />
-            <NumInput label="Y" value={Math.round(sprite.offsetY)} onChange={v => updateSprite({ ...sprite, offsetY: v })} />
+            <NumInput label="X" value={Math.round(sprite.offsetX)} onChange={v => commitSprite({ ...sprite, offsetX: v })} />
+            <NumInput label="Y" value={Math.round(sprite.offsetY)} onChange={v => commitSprite({ ...sprite, offsetY: v })} />
 
-            <div style={{ marginTop: 14, fontFamily: F, fontSize: 7, color: '#F5D03B' }}>HITBOX</div>
-            <NumInput label="W" value={grid.gridW} onChange={v => updateGrid({ gridW: Math.max(1, v), gridH: grid.gridH })} />
-            <NumInput label="H" value={grid.gridH} onChange={v => updateGrid({ gridW: grid.gridW, gridH: Math.max(1, v) })} />
-
-            {availableRots.length > 1 && (
-              <button onClick={syncAllRotations} style={{ ...btnStyle('rgba(6,182,212,0.15)', '#06B6D4'), marginTop: 14 }}>
-                SYNC ALL ROTS
-              </button>
-            )}
-
-            {/* === SAVE BUTTON === */}
-            <button onClick={handleSave} style={{
-              marginTop: 14, fontFamily: F, fontSize: 9, padding: '8px 10px', borderRadius: 4,
-              border: dirty ? '2px solid #F59E0B' : '2px solid #333', cursor: 'pointer',
-              background: dirty ? '#F59E0B' : '#333', color: dirty ? '#000' : '#888',
-              fontWeight: dirty ? 'bold' : 'normal',
-            }}>
-              {dirty ? '● SAVE' : 'SAVED'}
-            </button>
-
-            <button onClick={() => {
+            <div style={{ marginTop: 14, fontFamily: F, fontSize: 7, color: '#9ae89a' }}>OVERHANG (tiles)</div>
+            <NumInput label="T" value={Number(currentOverhang.top.toFixed(3))} onChange={v => {
               if (!def) return;
-              const cleanA = { ...assets };
-              const cleanG = { ...grids };
-              delete cleanA[def.id];
-              delete cleanG[def.id];
-              for (let r = 0; r < 4; r++) delete cleanA[`${def.id}_r${r}`];
-              setAssets(cleanA); setGrids(cleanG);
-              saveMap(ASSET_SIZES_KEY, cleanA); saveMap(GRID_SIZES_KEY, cleanG);
-              setDirty(false); redraw();
-            }} style={{ ...btnStyle('rgba(220,60,60,0.15)', '#e06060'), marginTop: 8 }}>
-              RESET PIECE
-            </button>
+              setOverhang(def.id, rot, { ...currentOverhang, top: v });
+              redraw(); scheduleSave();
+            }} />
+            <NumInput label="R" value={Number(currentOverhang.right.toFixed(3))} onChange={v => {
+              if (!def) return;
+              setOverhang(def.id, rot, { ...currentOverhang, right: v });
+              redraw(); scheduleSave();
+            }} />
+            <NumInput label="B" value={Number(currentOverhang.bottom.toFixed(3))} onChange={v => {
+              if (!def) return;
+              setOverhang(def.id, rot, { ...currentOverhang, bottom: v });
+              redraw(); scheduleSave();
+            }} />
+            <NumInput label="L" value={Number(currentOverhang.left.toFixed(3))} onChange={v => {
+              if (!def) return;
+              setOverhang(def.id, rot, { ...currentOverhang, left: v });
+              redraw(); scheduleSave();
+            }} />
 
-            <button onClick={() => {
-              localStorage.removeItem(ASSET_SIZES_KEY); localStorage.removeItem(GRID_SIZES_KEY);
-              setAssets({}); setGrids({}); setDirty(false); redraw();
-            }} style={{ ...btnStyle('rgba(220,60,60,0.4)', '#ff4040'), marginTop: 4 }}>
-              NUKE ALL
+            <button onClick={resetPiece} style={{ ...btnStyle('rgba(220,60,60,0.15)', '#e06060'), marginTop: 14 }}>
+              RESET OVERHANG
             </button>
           </>}
         </div>
