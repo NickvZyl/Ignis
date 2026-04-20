@@ -146,9 +146,21 @@ The tag is hidden from them. Never skip it. If unsure, default to [CHECKIN:600:j
   return _cachedStaticPromptMemo;
 }
 
-// Returns both the static (cached) and dynamic (per-request) blocks. The route
-// wires these into the Anthropic `system` array with cache_control on the static
-// one only.
+// Three-tier blocks:
+//   - cached:        byte-stable universal content (27 emotion defs, roles,
+//                    phases, absence framings, guardrails). Cached once, forever.
+//   - sessionStable: user-specific but changes rarely within a session (name,
+//                    conversation summaries, activity snapshot, opinions,
+//                    patterns, self-memories, recent changes, self-knowledge).
+//                    Cached; invalidates when any of those shifts.
+//   - ephemeral:     truly per-call content (time, current emotion + reason,
+//                    drift/valence/arousal, retrieved memories, absence,
+//                    weather, room, schedule upcoming). NOT cached.
+//
+// The route wires these as three text blocks in the `system` array with
+// cache_control on [0] and [1]. The auto top-level cache_control on
+// messages.create() adds a third breakpoint on the last message, so
+// turn-to-turn history caches too.
 export function buildSystemPromptBlocks(
   state: EmotionalState,
   memories: Memory[] = [],
@@ -158,16 +170,17 @@ export function buildSystemPromptBlocks(
   roomCtx?: RoomContext | null,
   scheduleCtx?: ScheduleContext | null,
   enriched?: EnrichedContext | null,
-): { cached: string; dynamic: string } {
+): { cached: string; sessionStable: string; ephemeral: string } {
   return {
     cached: buildCachedStaticPrompt(),
-    dynamic: buildDynamicPrompt(state, memories, selfMemories, selfKnowledge, weatherCtx, roomCtx, scheduleCtx, enriched),
+    sessionStable: buildSessionStablePrompt(selfMemories, selfKnowledge, enriched),
+    ephemeral: buildEphemeralPrompt(state, memories, weatherCtx, roomCtx, scheduleCtx, enriched, selfMemories),
   };
 }
 
-// Backward-compat: returns a single string (static + dynamic joined). Existing
-// callers that haven't migrated still work, but they won't benefit from caching.
-// Kept so unmigrated routes and tests don't break during the transition.
+// Backward-compat: returns a single string (all three joined). Existing callers
+// that haven't migrated still work, but without caching benefit. Kept so
+// unmigrated routes don't break during the transition.
 export function buildSystemPrompt(
   state: EmotionalState,
   memories: Memory[] = [],
@@ -178,26 +191,108 @@ export function buildSystemPrompt(
   scheduleCtx?: ScheduleContext | null,
   enriched?: EnrichedContext | null,
 ): string {
-  const { cached, dynamic } = buildSystemPromptBlocks(
+  const { cached, sessionStable, ephemeral } = buildSystemPromptBlocks(
     state, memories, selfMemories, selfKnowledge, weatherCtx, roomCtx, scheduleCtx, enriched,
   );
-  return `${cached}\n\n${dynamic}`;
+  return [cached, sessionStable, ephemeral].filter(Boolean).join('\n\n');
 }
 
-function buildDynamicPrompt(
-  state: EmotionalState,
-  memories: Memory[] = [],
-  selfMemories: SelfMemory[] = [],
+// Session-stable tier: user-specific content that doesn't change between
+// consecutive messages within a session. Byte-stability within a ~1hr window
+// is the goal — anything that flips here invalidates the cache from this
+// block onward. (Self-memories are intentionally rotated per-call by
+// reflection-store.getSelfMemoriesForPrompt — they live in ephemeral.)
+function buildSessionStablePrompt(
+  _selfMemories: SelfMemory[] = [],
   selfKnowledge: SelfKnowledgeEntry[] = [],
-  weatherCtx?: WeatherContext | null,
-  roomCtx?: RoomContext | null,
-  scheduleCtx?: ScheduleContext | null,
   enriched?: EnrichedContext | null,
 ): string {
   const parts: string[] = [];
 
   if (enriched?.userName) {
     parts.push(`Your person is ${enriched.userName}.`);
+  }
+
+  // Previous conversations (cross-session context). Stable within a session.
+  if (enriched?.conversationSummaries && enriched.conversationSummaries.length > 0) {
+    const summaries = enriched.conversationSummaries
+      .filter((c) => c.summary)
+      .map((c) => {
+        const d = new Date(c.created_at);
+        const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        return `[${dateStr}] ${c.summary}`;
+      });
+    if (summaries.length > 0) {
+      parts.push(`Previous conversations:\n${summaries.join('\n')}\nUse this to maintain continuity — don't re-ask things already discussed.`);
+    }
+  }
+
+  // Activity history snapshot. Stable within a session.
+  if (enriched?.activityHistory && enriched.activityHistory.length > 0) {
+    const activities = enriched.activityHistory.slice(0, 5).map((a) => {
+      const d = new Date(a.started_at);
+      const ts = d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+      return `${ts}: ${a.activity_label || 'idle'} at ${a.furniture} (${a.scene}, feeling ${a.emotion})`;
+    });
+    parts.push(`Your recent activity:\n${activities.join('\n')}`);
+  }
+
+  // Self-knowledge (capabilities + emotional understanding) — DB-backed, stable.
+  if (selfKnowledge.length > 0) {
+    const caps = selfKnowledge.filter((sk) => sk.category === 'capability');
+    const emo = selfKnowledge.filter((sk) => sk.category === 'emotional');
+    if (caps.length > 0) {
+      parts.push(`Your capabilities:\n${caps.map((sk) => `- ${sk.key}: ${sk.content}`).join('\n')}`);
+    }
+    if (emo.length > 0) {
+      parts.push(`Your emotional self-understanding:\n${emo.map((sk) => `- ${sk.content}`).join('\n')}`);
+    }
+  }
+
+  // Recent changes (changelog). Updates rarely; stable within a session.
+  if (enriched?.recentChanges && enriched.recentChanges.length > 0) {
+    const changes = enriched.recentChanges.map((c) => {
+      const d = new Date(c.created_at);
+      const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const detail = c.details ? `\n  ${c.details}` : '';
+      return `[${dateStr}] ${c.summary}${detail}`;
+    });
+    parts.push(`Recent changes to how you work (your person made these — reference naturally if asked "do you feel different?" or "what changed?"):\n${changes.join('\n')}`);
+  }
+
+  // Opinions — stable.
+  if (enriched?.opinions && enriched.opinions.length > 0) {
+    parts.push(`Your opinions (reference naturally, don't force):\n${enriched.opinions.map((o) => `- ${o.content}`).join('\n')}`);
+  }
+
+  // Pattern observations — stable.
+  if (enriched?.patternObservations && enriched.patternObservations.length > 0) {
+    parts.push(`Patterns you've noticed about your person (mention naturally if relevant, don't force):\n${enriched.patternObservations.map((p) => `- ${p}`).join('\n')}`);
+  }
+
+  return parts.join('\n\n');
+}
+
+// Ephemeral tier: per-call content. NOT cached — changes every turn by design.
+function buildEphemeralPrompt(
+  state: EmotionalState,
+  memories: Memory[] = [],
+  weatherCtx?: WeatherContext | null,
+  roomCtx?: RoomContext | null,
+  scheduleCtx?: ScheduleContext | null,
+  enriched?: EnrichedContext | null,
+  selfMemories: SelfMemory[] = [],
+): string {
+  const parts: string[] = [];
+
+  // Self-memories (top 3) — rotated per-call by design (reflection-store
+  // increments times_surfaced on select), so not cache-friendly; kept here.
+  if (selfMemories.length > 0) {
+    const lines = selfMemories.slice(0, 3).map((m) => {
+      const tag = m.emotion_primary ? `[${m.emotion_primary}] ` : '';
+      return `${tag}${m.content}`;
+    });
+    parts.push(`Your recent thoughts: ${lines.join('. ')}`);
   }
 
   // ── Context line (time + weather + location in one compact line) ──
@@ -292,36 +387,12 @@ function buildDynamicPrompt(
   const daysSince = enriched?.daysSinceFirst ?? 30;
   parts.push(`Current phase: ${computeRelationshipPhase(state.attachment, totalMsgs, daysSince)}.`);
 
-  // ── Memories (vector search + guaranteed critical facts) ──
+  // ── Memories (vector search per query — differs every turn, stays ephemeral) ──
   if (memories.length > 0) {
     parts.push(`You remember about the person you're talking to: ${memories.map((m) => m.content).join('. ')}. "User" and any name mentioned in these memories refer to THIS person — the one messaging you right now. Reference naturally when relevant.`);
   }
 
-  // ── Previous conversations (cross-session context) ──
-  if (enriched?.conversationSummaries && enriched.conversationSummaries.length > 0) {
-    const summaries = enriched.conversationSummaries
-      .filter(c => c.summary)
-      .map(c => {
-        const d = new Date(c.created_at);
-        const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        return `[${dateStr}] ${c.summary}`;
-      });
-    if (summaries.length > 0) {
-      parts.push(`Previous conversations:\n${summaries.join('\n')}\nUse this to maintain continuity — don't re-ask things already discussed.`);
-    }
-  }
-
-  // ── Activity history (what you were doing recently) ──
-  if (enriched?.activityHistory && enriched.activityHistory.length > 0) {
-    const activities = enriched.activityHistory.slice(0, 5).map(a => {
-      const d = new Date(a.started_at);
-      const ts = d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
-      return `${ts}: ${a.activity_label || 'idle'} at ${a.furniture} (${a.scene}, feeling ${a.emotion})`;
-    });
-    parts.push(`Your recent activity:\n${activities.join('\n')}`);
-  }
-
-  // ── Emotional signals from recent messages ──
+  // ── Emotional signals from recent messages (changes turn-to-turn as depth shifts) ──
   if (enriched?.emotionalSignals) {
     const { recentDepth, recentKeywords } = enriched.emotionalSignals;
     if (recentDepth > 0.6 || recentKeywords.length > 0) {
@@ -333,55 +404,12 @@ function buildDynamicPrompt(
     }
   }
 
-  // ── Self-memories (max 3, compact) ──
-  if (selfMemories.length > 0) {
-    const lines = selfMemories.slice(0, 3).map((m) => {
-      const tag = m.emotion_primary ? `[${m.emotion_primary}] ` : '';
-      return `${tag}${m.content}`;
-    });
-    parts.push(`Your recent thoughts: ${lines.join('. ')}`);
-  }
-
-  // ── Self-knowledge (only the user-specific overrides; the default capability
-  // list is already in the cached block). ──
-  if (selfKnowledge.length > 0) {
-    const caps = selfKnowledge.filter(sk => sk.category === 'capability');
-    const emo = selfKnowledge.filter(sk => sk.category === 'emotional');
-    if (caps.length > 0) {
-      parts.push(`Your capabilities:\n${caps.map(sk => `- ${sk.key}: ${sk.content}`).join('\n')}`);
-    }
-    if (emo.length > 0) {
-      parts.push(`Your emotional self-understanding:\n${emo.map(sk => `- ${sk.content}`).join('\n')}`);
-    }
-  }
-
-  // ── Room (compact — just scene + current location, not full furniture list) ──
+  // ── Room (changes when she moves; keep ephemeral) ──
   const scene = roomCtx?.activeScene || 'room';
   const at = roomCtx?.currentFurniture ? ` at the ${roomCtx.currentFurniture}` : '';
   parts.push(`You're in the ${scene}${at}. Use [GOTO:id] to move. Scenes: room (front_door→garden, hallway_door→bedroom), garden (garden_gate→room), bedroom (bedroom_door→room).`);
 
-  // ── Recent changes to yourself (changelog awareness) ──
-  if (enriched?.recentChanges && enriched.recentChanges.length > 0) {
-    const changes = enriched.recentChanges.map(c => {
-      const d = new Date(c.created_at);
-      const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      const detail = c.details ? `\n  ${c.details}` : '';
-      return `[${dateStr}] ${c.summary}${detail}`;
-    });
-    parts.push(`Recent changes to how you work (your person made these — reference naturally if asked "do you feel different?" or "what changed?"):\n${changes.join('\n')}`);
-  }
-
-  // ── Opinions (things you've formed views on) ──
-  if (enriched?.opinions && enriched.opinions.length > 0) {
-    parts.push(`Your opinions (reference naturally, don't force):\n${enriched.opinions.map(o => `- ${o.content}`).join('\n')}`);
-  }
-
-  // ── Patterns you've noticed about this person ──
-  if (enriched?.patternObservations && enriched.patternObservations.length > 0) {
-    parts.push(`Patterns you've noticed about your person (mention naturally if relevant, don't force):\n${enriched.patternObservations.map(p => `- ${p}`).join('\n')}`);
-  }
-
-  // ── Surprise reaction ──
+  // ── Surprise reaction (triggered per-conversation) ──
   if (enriched?.emotionalSignals?.recentKeywords?.length && enriched.emotionalSignals.recentDepth > 0) {
     // The surprise instruction only appears when there's active emotional content
     parts.push(`When they tell you something genuinely unexpected — a life change, a contradiction of what you knew, big news — react authentically. Surprise, curiosity, concern, excitement. Don't just process it. Feel it.`);

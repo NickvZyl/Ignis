@@ -443,7 +443,7 @@ function extractText(msg: Anthropic.Message): string {
 
 export async function POST(req: NextRequest) {
   const startedAt = Date.now();
-  const { messages, stream = true, userId, accessToken } = await req.json();
+  const { messages, stream = true, userId, accessToken, messageId, sessionSystem } = await req.json();
 
   // Rate limit (hard 429 with Retry-After; logger is the source of truth).
   if (userId) {
@@ -472,11 +472,29 @@ export async function POST(req: NextRequest) {
   // and isn't typed in the SDK's default ToolUnion yet.
   if (webSearchEnabled) anthropicTools.unshift(WEB_SEARCH_SERVER_TOOL as unknown as Anthropic.ToolUnion);
 
+  // Three-tier system prompt:
+  //   [0] cached static (universal, byte-stable forever) — cache breakpoint
+  //   [1] session-stable (per-user, rarely changes within a session) — cache breakpoint
+  //   [2] ephemeral (truly per-call: time, emotion values, retrieved memories) — NOT cached
+  // Plus the top-level cache_control in runToolLoop adds a 3rd breakpoint on
+  // the last message so turn-to-turn history caches too.
+  // Per-breakpoint TTL:
+  //   - cached static (universal, never varies): 1h — reads easily amortize the 2× write
+  //   - session-stable (per-user, stable within ~1h of activity): 1h — survives short breaks
+  //   - multi-turn history (auto breakpoint in runToolLoop): default 5m, it churns anyway
   const cacheEnabled = (process.env.LLM_CACHE_ENABLED ?? 'true') !== 'false';
+  const longTtl = { type: 'ephemeral' as const, ttl: '1h' as const };
   const system: Anthropic.TextBlockParam[] = [
     cacheEnabled
-      ? { type: 'text', text: cachedStatic, cache_control: { type: 'ephemeral' } }
+      ? ({ type: 'text', text: cachedStatic, cache_control: longTtl } as any)
       : { type: 'text', text: cachedStatic },
+    ...(sessionSystem
+      ? [
+          cacheEnabled
+            ? ({ type: 'text' as const, text: sessionSystem, cache_control: longTtl } as any)
+            : ({ type: 'text' as const, text: sessionSystem }),
+        ]
+      : []),
     ...(dynamicSystem ? [{ type: 'text' as const, text: dynamicSystem }] : []),
   ];
 
@@ -485,6 +503,45 @@ export async function POST(req: NextRequest) {
       ? convo[convo.length - 1].content
       : '';
   const model = pickModel({ incomingMessage, needsWebSearch: false });
+
+  // Gated prompt breakdown — flip LLM_DEBUG_PROMPTS=true, send one message,
+  // check logs, flip back. Rough chars→tokens conversion: ~3.5 chars/token
+  // for English prose, heavier for JSON-dense tool schemas.
+  if (process.env.LLM_DEBUG_PROMPTS === 'true') {
+    const approxTokens = (s: string) => Math.round(s.length / 3.5);
+    const convoLens = convo.map((m: any) => ({
+      role: m.role,
+      chars: (m.content ?? '').length,
+      tokens: approxTokens(m.content ?? ''),
+    }));
+    const totalConvoChars = convoLens.reduce((s: number, m: any) => s + m.chars, 0);
+    const toolsJson = JSON.stringify(anthropicTools);
+    console.log('[chat:prompt-breakdown]', JSON.stringify({
+      cached_system_chars: cachedStatic.length,
+      cached_system_tokens_approx: approxTokens(cachedStatic),
+      session_stable_chars: (sessionSystem ?? '').length,
+      session_stable_tokens_approx: approxTokens(sessionSystem ?? ''),
+      ephemeral_system_chars: dynamicSystem.length,
+      ephemeral_system_tokens_approx: approxTokens(dynamicSystem),
+      tools_json_chars: toolsJson.length,
+      tools_json_tokens_approx: approxTokens(toolsJson),
+      tools_count: anthropicTools.length,
+      history_messages: convo.length,
+      history_chars_total: totalConvoChars,
+      history_tokens_approx: approxTokens(convo.map((m: any) => m.content ?? '').join(' ')),
+      model,
+      breakpoints: sessionSystem ? 3 : 2,
+    }, null, 2));
+    // Also dump each section of session_stable so we can diff consecutive calls
+    // and find the silent invalidator. Each section has a distinct heading.
+    if (sessionSystem) {
+      const sections = sessionSystem.split('\n\n').map((s: string) => ({
+        head: s.split('\n')[0].slice(0, 80),
+        len: s.length,
+      }));
+      console.log('[chat:session-stable-sections]', JSON.stringify(sections, null, 2));
+    }
+  }
 
   const client = getAnthropic();
 
@@ -518,6 +575,7 @@ export async function POST(req: NextRequest) {
       cacheCreationTokens: usageTotals.cache_creation_input_tokens,
       latencyMs: Date.now() - startedAt,
       toolsUsed,
+      messageId: messageId ?? null,
     });
 
     if (stream) {
@@ -544,6 +602,7 @@ export async function POST(req: NextRequest) {
       latencyMs: Date.now() - startedAt,
       toolsUsed: [],
       error: msg,
+      messageId: messageId ?? null,
     });
     return Response.json(
       { error: "Hmm, I can't think right now. Try again in a moment!" },

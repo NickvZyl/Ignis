@@ -22,6 +22,9 @@ export interface LLMCallLog {
   latencyMs: number;
   toolsUsed: string[];
   error?: string;
+  // Ties this call to the user message that triggered it — populated by the
+  // chat route; null for cron / non-user-initiated calls.
+  messageId?: string | null;
 }
 
 export async function logLLMCall(entry: LLMCallLog): Promise<void> {
@@ -46,6 +49,7 @@ export async function logLLMCall(entry: LLMCallLog): Promise<void> {
       latency_ms: entry.latencyMs,
       tools_used: entry.toolsUsed,
       error: entry.error ?? null,
+      message_id: entry.messageId ?? null,
     });
     if (error) {
       // Logging must never take down a request. Surface to stderr and move on.

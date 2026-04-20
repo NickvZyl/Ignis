@@ -423,7 +423,7 @@ interface ChatState {
   clearChat: () => void;
 }
 
-async function apiChat(messages: ChatCompletionMessage[], stream: boolean = true, userId?: string) {
+async function apiChat(messages: ChatCompletionMessage[], stream: boolean = true, userId?: string, messageId?: string, sessionSystem?: string) {
   // Get the current session's access token for server-side Supabase calls
   let accessToken: string | undefined;
   try {
@@ -434,7 +434,7 @@ async function apiChat(messages: ChatCompletionMessage[], stream: boolean = true
   const res = await fetch(api('/api/chat'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, stream, userId, accessToken }),
+    body: JSON.stringify({ messages, stream, userId, accessToken, messageId, sessionSystem }),
   });
   if (!res.ok) {
     let message = `Chat API error (${res.status})`;
@@ -577,7 +577,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (!emotionalState) throw new Error('Emotional state not loaded');
 
       // Only the dynamic block is sent — the server owns the cached static block.
-      const { dynamic: systemPrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
+      // Three tiers: cached (universal, server-owned), sessionStable (per-user,
+      // cacheable), ephemeral (per-call, never cached). Only sessionStable +
+      // ephemeral cross the wire.
+      const { sessionStable, ephemeral: systemPrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
 
       // 5b. Clear morning thought after it's been included in a prompt (one-time use)
       if (emotionalState.morning_thought) {
@@ -640,8 +643,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingMessageId: streamId,
       });
 
-      // 8. Stream response via API route
-      const response = await apiChat(apiMessages, true, userId);
+      // 8. Stream response via API route (tag log rows with the user message id
+      // so the admin cost view can group calls per message)
+      const response = await apiChat(apiMessages, true, userId, userMsg.id, sessionStable);
 
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
@@ -997,7 +1001,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const { dynamic: systemPrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
+      // Three tiers: cached (universal, server-owned), sessionStable (per-user,
+      // cacheable), ephemeral (per-call, never cached). Only sessionStable +
+      // ephemeral cross the wire.
+      const { sessionStable, ephemeral: systemPrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
 
       let greetingContext: string;
       if (hoursSince < 6) {
@@ -1032,7 +1039,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingMessageId: streamId,
       });
 
-      const response = await apiChat(apiMessages, true, userId);
+      const response = await apiChat(apiMessages, true, userId, undefined, sessionStable);
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
 
@@ -1135,7 +1142,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const { dynamic: systemPrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
+      // Three tiers: cached (universal, server-owned), sessionStable (per-user,
+      // cacheable), ephemeral (per-call, never cached). Only sessionStable +
+      // ephemeral cross the wire.
+      const { sessionStable, ephemeral: systemPrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
 
       const { nextCheckinReason } = get();
       const checkinContext = nextCheckinReason
@@ -1165,7 +1175,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingMessageId: streamId,
       });
 
-      const response = await apiChat(apiMessages, true, userId);
+      const response = await apiChat(apiMessages, true, userId, undefined, sessionStable);
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
 
@@ -1258,7 +1268,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const { dynamic: basePrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
+      const { sessionStable, ephemeral: basePrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
       const systemPrompt = basePrompt + `\n\n## Right now\nYou just said you'd "${context}". You've done it (or tried to). Now follow up naturally — tell your person what happened, whether it worked, what you changed. Be brief and conversational, like continuing a sentence. One short message. Don't re-explain what you were doing, just give the result. If you made schedule changes, reference the specific times and activities you changed.`;
 
       const apiMessages: ChatCompletionMessage[] = [
@@ -1283,7 +1293,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingMessageId: streamId,
       });
 
-      const response = await apiChat(apiMessages, true, userId);
+      const response = await apiChat(apiMessages, true, userId, undefined, sessionStable);
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
 
@@ -1382,7 +1392,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const emotionalState = useCompanionStore.getState().emotionalState;
       if (!emotionalState) return;
 
-      const { dynamic: systemPrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
+      // Three tiers: cached (universal, server-owned), sessionStable (per-user,
+      // cacheable), ephemeral (per-call, never cached). Only sessionStable +
+      // ephemeral cross the wire.
+      const { sessionStable, ephemeral: systemPrompt } = buildSystemPromptBlocks(emotionalState, memories, selfMemories, selfKnowledge, getWeatherContext(), getRoomContext(), getScheduleContext(get().messages), enriched);
 
       const apiMessages: ChatCompletionMessage[] = [
         { role: 'system', content: systemPrompt + `\n\n## Right now\nYou just had this thought: "${thought}". Share it naturally with your person — bring it up casually, like mentioning something you noticed or were thinking about. One short message. Don't quote it verbatim, paraphrase it in your own voice.` },
@@ -1406,7 +1419,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         streamingMessageId: streamId,
       });
 
-      const response = await apiChat(apiMessages, true, userId);
+      const response = await apiChat(apiMessages, true, userId, undefined, sessionStable);
       const reader = response.body?.getReader();
       if (!reader) throw new Error('No response body');
 

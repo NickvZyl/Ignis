@@ -93,7 +93,16 @@ export async function runToolLoop(opts: RunToolLoopOpts): Promise<ToolLoopResult
       system: opts.system,
       messages: running,
       tools: opts.tools,
-    });
+      // Top-level auto-caching: places a second ephemeral breakpoint on the
+      // LAST cacheable block in the request (i.e. the most recent user
+      // message or tool result). Combined with the fixed breakpoint on the
+      // cached static system block, this lets each turn read the previous
+      // turn's full prefix instead of re-sending history at full price.
+      // Max 4 breakpoints/request (we use 2). Writes to cache cost ~1.25×;
+      // reads ~0.1×; break-even at 2 reads per write, so every turn beyond
+      // the first saves.
+      cache_control: { type: 'ephemeral' },
+    } as any);
     lastMessage = response;
     opts.onIteration?.(response);
 

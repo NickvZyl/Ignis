@@ -335,6 +335,7 @@ export default function Home() {
                   { label: 'RESIZE', href: '/dev/resize', color: '#d070d0' },
                   { label: 'ZONES', href: '/dev/zones', color: '#e06080' },
                   { label: 'SCHEDULE', href: '/dev/schedule', color: '#a0e0a0' },
+                  { label: 'COSTS', href: '/dev/costs', color: '#f5d03b' },
                 ].map(({ label, href, color }) => (
                   <button
                     key={label}
