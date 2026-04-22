@@ -580,10 +580,23 @@ export async function POST(req: NextRequest) {
     ...(dynamicSystem ? [{ type: 'text' as const, text: dynamicSystem }] : []),
   ];
 
-  const incomingMessage =
-    convo.length > 0 && convo[convo.length - 1].role === 'user'
-      ? convo[convo.length - 1].content
-      : '';
+  const lastMsg = convo.length > 0 && convo[convo.length - 1].role === 'user'
+    ? convo[convo.length - 1]
+    : null;
+  // Content can be a plain string (web path) or a multimodal block array
+  // (mobile image path). Extract just the text for model-routing heuristics.
+  const incomingMessage: string = (() => {
+    if (!lastMsg) return '';
+    const c = lastMsg.content;
+    if (typeof c === 'string') return c;
+    if (Array.isArray(c)) {
+      return c
+        .filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
+        .map((b: any) => b.text)
+        .join(' ');
+    }
+    return '';
+  })();
   const model = pickModel({ incomingMessage, needsWebSearch: false });
 
   // Gated prompt breakdown — flip LLM_DEBUG_PROMPTS=true, send one message,
