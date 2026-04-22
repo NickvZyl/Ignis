@@ -40,6 +40,7 @@ export interface PresencePayload {
   latitude?: number;
   longitude?: number;
   city?: string;
+  timezone?: string;
 }
 
 export async function postPresence(payload: PresencePayload): Promise<void> {

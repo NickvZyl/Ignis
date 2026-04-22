@@ -42,11 +42,19 @@ export default function ChatScreen() {
       const token = data.session?.access_token;
       if (!token) return;
       const loc = await getCurrentLocation();
+      const timezone = (() => {
+        try {
+          return Intl.DateTimeFormat().resolvedOptions().timeZone;
+        } catch {
+          return undefined;
+        }
+      })();
       postPresence({
         accessToken: token,
         latitude: loc?.latitude,
         longitude: loc?.longitude,
         city: loc?.city,
+        timezone,
       });
     };
     pingPresence();

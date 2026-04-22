@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
     p_latitude: typeof body.latitude === 'number' ? body.latitude : null,
     p_longitude: typeof body.longitude === 'number' ? body.longitude : null,
     p_location_city: typeof body.city === 'string' ? body.city : null,
+    p_timezone: typeof body.timezone === 'string' ? body.timezone : null,
   });
   if (error) {
     return Response.json({ error: error.message }, { status: 500 });
