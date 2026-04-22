@@ -45,6 +45,7 @@
     "../src/stores",
     "../src/lib/push.ts",
     "../src/lib/supabase.ts",
-    "../src/lib/api.ts"
+    "../src/lib/api.ts",
+    "../src/lib/location.ts"
   ]
 }
