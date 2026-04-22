@@ -15,6 +15,7 @@ import {
 } from '@/lib/llm/tools';
 import { RECALL_TOOLS } from '@/lib/llm/recall-tools';
 import { CONFIG } from '@/constants/config';
+import { buildServerSessionPrompt } from '@web/lib/session-prompt';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -465,6 +466,20 @@ export async function POST(req: NextRequest) {
   const cachedStatic = buildCachedStaticPrompt();
 
   const db = accessToken ? getSupabaseForUser(accessToken) : null;
+
+  // Fallback: if the client didn't send a session-stable block (e.g. the mobile
+  // app, which doesn't build prompts client-side), assemble one server-side
+  // from Supabase. Matches the format the web client would have sent, so
+  // Igni's system prompt shape is consistent across clients.
+  let effectiveSessionSystem: string = sessionSystem ?? '';
+  if (!effectiveSessionSystem && db && userId) {
+    try {
+      effectiveSessionSystem = await buildServerSessionPrompt(db, userId);
+    } catch (err: any) {
+      console.warn('[chat] server session prompt build failed:', err?.message ?? err);
+    }
+  }
+
   const registry = buildRegistry([...TODO_TOOLS, ...SCHEDULE_TOOLS, ...IDEA_TOOLS, ...RECALL_TOOLS]);
 
   const anthropicTools: Anthropic.ToolUnion[] = toolsForAnthropic(registry);
@@ -489,11 +504,11 @@ export async function POST(req: NextRequest) {
     cacheEnabled
       ? ({ type: 'text', text: cachedStatic, cache_control: longTtl } as any)
       : { type: 'text', text: cachedStatic },
-    ...(sessionSystem
+    ...(effectiveSessionSystem
       ? [
           cacheEnabled
-            ? ({ type: 'text' as const, text: sessionSystem, cache_control: longTtl } as any)
-            : ({ type: 'text' as const, text: sessionSystem }),
+            ? ({ type: 'text' as const, text: effectiveSessionSystem, cache_control: longTtl } as any)
+            : ({ type: 'text' as const, text: effectiveSessionSystem }),
         ]
       : []),
     ...(dynamicSystem ? [{ type: 'text' as const, text: dynamicSystem }] : []),
