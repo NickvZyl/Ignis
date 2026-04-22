@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { sendPushToUser } from '@/lib/push';
+import { sendPushToUser } from '@web/lib/push';
 
 const DREAM_SECRET = process.env.DREAM_CRON_SECRET || 'igni-dream-key';
 const USER_ID = '92d65536-f35b-464c-9898-372e0a899f7c';
