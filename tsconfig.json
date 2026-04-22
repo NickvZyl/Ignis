@@ -23,6 +23,12 @@
     "scripts",
     "backup-src-*",
     ".expo",
-    "dist"
+    "dist",
+    "src/lib/anthropic.ts",
+    "src/lib/openrouter.ts",
+    "src/lib/emotional-engine.ts",
+    "src/lib/reflection-engine.ts",
+    "src/lib/llm",
+    "src/prompts"
   ]
 }

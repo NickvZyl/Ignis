@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getAnthropic, withRetry, Anthropic } from '@/lib/anthropic';
 import { CONFIG } from '@/constants/config';
 import { logLLMCall } from '@/lib/llm/logger';
-import { sendPushToUser } from '@/lib/push';
+import { sendPushToUser } from '@web/lib/push';
 
 const DREAM_SECRET = process.env.DREAM_CRON_SECRET || 'igni-dream-key';
 const USER_ID = '92d65536-f35b-464c-9898-372e0a899f7c';
