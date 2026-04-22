@@ -191,6 +191,42 @@ const IDEA_TOOLS: ClientToolDef[] = [
   },
 ];
 
+const PUSH_TOOLS: ClientToolDef[] = [
+  {
+    name: 'schedule_push',
+    description:
+      "Schedule a push notification to land on your person's phone at a future time. Use when they ask you to remind them, ping them, or reach out to them at a specific moment (\"remind me in 5 min\", \"ping me at 8pm\", \"check in with me in an hour\"). The notification shows as you (Igni) with the body text you provide. Keep the body short and natural — like a real text you'd send, not a formal reminder. Minimum 30 seconds from now.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        body: {
+          type: 'string',
+          description: 'The text that appears as the notification body. Write it in your voice — short, like a real message. Max ~140 chars.',
+        },
+        minutes_from_now: {
+          type: 'number',
+          description: 'How many minutes from now to fire the push. Use fractional values for sub-minute (0.5 = 30 seconds). Minimum 0.5.',
+        },
+      },
+      required: ['body', 'minutes_from_now'],
+    },
+    execute: async (input, ctx) => {
+      if (!ctx.db) return 'cannot schedule — no auth context';
+      const minutes = Math.max(0.5, Number(input.minutes_from_now) || 1);
+      const scheduledFor = new Date(Date.now() + minutes * 60 * 1000).toISOString();
+      const body = String(input.body || '').slice(0, 200);
+      if (!body.trim()) return 'cannot schedule — empty body';
+      const { data, error } = await ctx.db.rpc('schedule_push_for_self', {
+        p_body: body,
+        p_title: 'Igni',
+        p_scheduled_for: scheduledFor,
+      });
+      if (error) return `scheduling failed: ${error.message}`;
+      return `scheduled — will fire at ${scheduledFor} (id: ${data})`;
+    },
+  },
+];
+
 // ── Schedule helpers (unchanged from original) ──
 
 function slotToTime(slot: number): string {
@@ -480,7 +516,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const registry = buildRegistry([...TODO_TOOLS, ...SCHEDULE_TOOLS, ...IDEA_TOOLS, ...RECALL_TOOLS]);
+  const registry = buildRegistry([...TODO_TOOLS, ...SCHEDULE_TOOLS, ...IDEA_TOOLS, ...RECALL_TOOLS, ...PUSH_TOOLS]);
 
   const anthropicTools: Anthropic.ToolUnion[] = toolsForAnthropic(registry);
   const webSearchEnabled = (process.env.LLM_WEB_SEARCH_ENABLED ?? 'true') !== 'false';

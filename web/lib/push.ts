@@ -11,18 +11,38 @@ interface PushOptions {
   body: string;
   data?: Record<string, unknown>;
   sound?: 'default' | null;
+  /**
+   * Skip if the user was foregrounding the app within this many seconds.
+   * Default 120. Set to 0 to bypass the presence check.
+   */
+  skipIfActiveWithinSeconds?: number;
 }
 
 export interface PushResult {
   sent: number;
   failed: number;
   errors: string[];
+  skipped?: string;
 }
 
 export async function sendPushToUser(
   userId: string,
   opts: PushOptions
 ): Promise<PushResult> {
+  const skipWindow = opts.skipIfActiveWithinSeconds ?? 120;
+  if (skipWindow > 0) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('last_active_at')
+      .eq('id', userId)
+      .maybeSingle();
+    const lastActive = profile?.last_active_at ? new Date(profile.last_active_at).getTime() : 0;
+    const secondsAgo = (Date.now() - lastActive) / 1000;
+    if (lastActive && secondsAgo < skipWindow) {
+      return { sent: 0, failed: 0, errors: [], skipped: `user active ${Math.round(secondsAgo)}s ago` };
+    }
+  }
+
   const { data: tokens, error } = await supabase.rpc('get_push_tokens', {
     target_user_id: userId,
   });

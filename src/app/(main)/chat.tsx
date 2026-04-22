@@ -7,6 +7,7 @@ import {
   Platform,
   TouchableOpacity,
   Text,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -16,6 +17,8 @@ import TypingIndicator from '@/components/TypingIndicator';
 import { useChatStore } from '@/stores/chat-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { registerForPush } from '@/lib/push';
+import { postPresence } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import { COLORS } from '@/constants/ignisColors';
 import type { Message } from '@/types';
 
@@ -32,6 +35,18 @@ export default function ChatScreen() {
     if (!userId) return;
     startConversation(userId);
     registerForPush(userId).catch((e) => console.warn('[push] registration failed', e));
+
+    const pingPresence = async () => {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (token) postPresence(token);
+    };
+    pingPresence();
+
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') pingPresence();
+    });
+    return () => sub.remove();
   }, [userId]);
 
   const handleSend = useCallback(

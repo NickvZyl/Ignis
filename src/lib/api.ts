@@ -34,3 +34,17 @@ export async function postChat(req: ChatRequest): Promise<ChatResponse> {
   const content: string = json?.choices?.[0]?.message?.content ?? '';
   return { content };
 }
+
+export async function postPresence(accessToken: string): Promise<void> {
+  // Fire-and-forget; never throw. We don't want presence pings to interrupt
+  // anything user-facing.
+  try {
+    await fetch(`${API_URL}/api/presence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken }),
+    });
+  } catch {
+    // ignore — next foreground will try again
+  }
+}
