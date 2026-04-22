@@ -16,6 +16,7 @@ import {
 import { RECALL_TOOLS } from '@/lib/llm/recall-tools';
 import { CONFIG } from '@/constants/config';
 import { buildServerSessionPrompt } from '@web/lib/session-prompt';
+import { buildServerEphemeralPrompt } from '@web/lib/ephemeral-prompt';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -546,6 +547,18 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Same fallback for the ephemeral (per-call) tier. Mobile doesn't send a
+  // system-role message with dynamic context either; we assemble emotional
+  // state + time + self-memories server-side so mobile-Igni isn't flat.
+  let effectiveDynamicSystem: string = dynamicSystem;
+  if (!effectiveDynamicSystem && db && userId) {
+    try {
+      effectiveDynamicSystem = await buildServerEphemeralPrompt(db, userId);
+    } catch (err: any) {
+      console.warn('[chat] server ephemeral prompt build failed:', err?.message ?? err);
+    }
+  }
+
   const registry = buildRegistry([...TODO_TOOLS, ...SCHEDULE_TOOLS, ...IDEA_TOOLS, ...RECALL_TOOLS, ...PUSH_TOOLS, ...MAPS_TOOLS]);
 
   const anthropicTools: Anthropic.ToolUnion[] = toolsForAnthropic(registry);
@@ -577,7 +590,7 @@ export async function POST(req: NextRequest) {
             : ({ type: 'text' as const, text: effectiveSessionSystem }),
         ]
       : []),
-    ...(dynamicSystem ? [{ type: 'text' as const, text: dynamicSystem }] : []),
+    ...(effectiveDynamicSystem ? [{ type: 'text' as const, text: effectiveDynamicSystem }] : []),
   ];
 
   const lastMsg = convo.length > 0 && convo[convo.length - 1].role === 'user'
