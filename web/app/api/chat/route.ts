@@ -191,6 +191,36 @@ const IDEA_TOOLS: ClientToolDef[] = [
   },
 ];
 
+const MAPS_TOOLS: ClientToolDef[] = [
+  {
+    name: 'open_maps',
+    description:
+      "Produce a Google Maps deep-link that your person can tap to start navigation. Use when they ask for directions, how to get somewhere, or navigation help (\"how do I get to X\", \"directions to Y\"). You don't display a map — you give them a link their phone's Maps app will open with the route preloaded. Compose your reply normally and include the URL inline (the app will make it tappable). Destinations can be addresses, place names, or landmark names.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        destination: {
+          type: 'string',
+          description: 'The place they want to go. Free-form text — address, business name, landmark, whatever. Google Maps resolves it.',
+        },
+        origin: {
+          type: 'string',
+          description: 'Optional starting point. If omitted, Maps uses the device current location.',
+        },
+      },
+      required: ['destination'],
+    },
+    execute: async (input) => {
+      const destination = String(input.destination || '').trim();
+      if (!destination) return 'destination is required';
+      const params = new URLSearchParams({ api: '1', destination });
+      const origin = String(input.origin || '').trim();
+      if (origin) params.set('origin', origin);
+      return `https://www.google.com/maps/dir/?${params.toString()}`;
+    },
+  },
+];
+
 const PUSH_TOOLS: ClientToolDef[] = [
   {
     name: 'schedule_push',
@@ -516,7 +546,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const registry = buildRegistry([...TODO_TOOLS, ...SCHEDULE_TOOLS, ...IDEA_TOOLS, ...RECALL_TOOLS, ...PUSH_TOOLS]);
+  const registry = buildRegistry([...TODO_TOOLS, ...SCHEDULE_TOOLS, ...IDEA_TOOLS, ...RECALL_TOOLS, ...PUSH_TOOLS, ...MAPS_TOOLS]);
 
   const anthropicTools: Anthropic.ToolUnion[] = toolsForAnthropic(registry);
   const webSearchEnabled = (process.env.LLM_WEB_SEARCH_ENABLED ?? 'true') !== 'false';

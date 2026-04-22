@@ -11,9 +11,36 @@ interface ChatState {
   error: string | null;
   startConversation: (userId: string) => Promise<void>;
   refreshMessages: () => Promise<void>;
-  sendMessage: (content: string, userId: string) => Promise<void>;
+  sendMessage: (content: string, userId: string, imageUri?: string) => Promise<void>;
   extractMemories: (userId: string) => Promise<void>;
   clearChat: () => void;
+}
+
+async function uploadChatImage(userId: string, uri: string): Promise<string | null> {
+  try {
+    const res = await fetch(uri);
+    const arrayBuffer = await res.arrayBuffer();
+    const ext = uri.split('.').pop()?.split('?')[0] ?? 'jpg';
+    const contentType =
+      ext.toLowerCase() === 'png'
+        ? 'image/png'
+        : ext.toLowerCase() === 'webp'
+          ? 'image/webp'
+          : 'image/jpeg';
+    const path = `${userId}/${Date.now()}.${ext}`;
+    const { error: uploadError } = await supabase.storage
+      .from('chat-images')
+      .upload(path, arrayBuffer, { contentType });
+    if (uploadError) {
+      console.warn('[upload] failed', uploadError.message);
+      return null;
+    }
+    const { data: urlData } = supabase.storage.from('chat-images').getPublicUrl(path);
+    return urlData.publicUrl;
+  } catch (err: any) {
+    console.warn('[upload] threw', err?.message ?? err);
+    return null;
+  }
 }
 
 async function getAccessToken(): Promise<string> {
@@ -82,7 +109,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ messages: (msgs || []) as Message[] });
   },
 
-  sendMessage: async (content, userId) => {
+  sendMessage: async (content, userId, imageUri) => {
     const state = get();
     if (state.isGenerating) return;
 
@@ -100,9 +127,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       // Igni sees the full context.
       await get().refreshMessages();
 
+      let imageUrl: string | null = null;
+      if (imageUri) {
+        imageUrl = await uploadChatImage(userId, imageUri);
+      }
+
       const { data: userMsg, error: userError } = await supabase
         .from('messages')
-        .insert({ conversation_id: conversationId, role: 'user', content })
+        .insert({ conversation_id: conversationId, role: 'user', content, image_url: imageUrl })
         .select()
         .single();
       if (userError) throw userError;
@@ -110,10 +142,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((s) => ({ messages: [...s.messages, userMsg as Message] }));
 
       const accessToken = await getAccessToken();
-      const apiMessages = get().messages.map((m) => ({
-        role: m.role as 'user' | 'assistant' | 'system',
-        content: m.content,
-      }));
+      const apiMessages = get().messages.map((m) => {
+        if (m.image_url) {
+          const blocks: any[] = [];
+          if (m.content) blocks.push({ type: 'text', text: m.content });
+          blocks.push({ type: 'image', source: { type: 'url', url: m.image_url } });
+          return { role: m.role as 'user' | 'assistant' | 'system', content: blocks };
+        }
+        return {
+          role: m.role as 'user' | 'assistant' | 'system',
+          content: m.content,
+        };
+      });
 
       const res = await postChat({
         messages: apiMessages,

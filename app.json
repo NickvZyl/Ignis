@@ -37,6 +37,19 @@
             "imageWidth": 76
           }
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Igni would like to attach photos you send her.",
+          "cameraPermission": "Igni would like to take photos you send her."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Igni uses your location to ground her responses — weather, nearby context, navigation help."
+        }
       ]
     ],
     "experiments": {

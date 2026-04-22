@@ -33,7 +33,11 @@ export async function buildServerSessionPrompt(
       .select('category, key, content')
       .eq('user_id', userId)
       .in('category', ['capability', 'emotional']),
-    db.from('profiles').select('display_name').eq('id', userId).maybeSingle(),
+    db
+      .from('profiles')
+      .select('display_name, location_city, latitude, longitude, location_updated_at')
+      .eq('id', userId)
+      .maybeSingle(),
     db
       .from('changelogs')
       .select('summary, details, created_at')
@@ -46,6 +50,14 @@ export async function buildServerSessionPrompt(
   const userName = profileRes.data?.display_name;
   if (userName) {
     parts.push(`Your person is ${userName}.`);
+  }
+
+  const city = profileRes.data?.location_city;
+  const lat = profileRes.data?.latitude;
+  const lon = profileRes.data?.longitude;
+  if (city || (lat != null && lon != null)) {
+    const label = city ? city : `${lat?.toFixed(3)}, ${lon?.toFixed(3)}`;
+    parts.push(`Your person's current area: ${label}. Reference naturally — don't be creepy about it, treat it like knowing what city a friend is in.`);
   }
 
   const skRows = (skRes.data ?? []) as SelfKnowledgeRow[];

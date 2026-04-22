@@ -15,7 +15,11 @@ export async function POST(req: NextRequest) {
     global: { headers: { Authorization: `Bearer ${accessToken}` } },
   });
 
-  const { error } = await client.rpc('mark_user_active');
+  const { error } = await client.rpc('mark_user_active', {
+    p_latitude: typeof body.latitude === 'number' ? body.latitude : null,
+    p_longitude: typeof body.longitude === 'number' ? body.longitude : null,
+    p_location_city: typeof body.city === 'string' ? body.city : null,
+  });
   if (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

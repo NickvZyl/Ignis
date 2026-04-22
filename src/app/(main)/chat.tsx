@@ -18,6 +18,7 @@ import { useChatStore } from '@/stores/chat-store';
 import { useAuthStore } from '@/stores/auth-store';
 import { registerForPush } from '@/lib/push';
 import { postPresence } from '@/lib/api';
+import { getCurrentLocation } from '@/lib/location';
 import { supabase } from '@/lib/supabase';
 import { COLORS } from '@/constants/ignisColors';
 import type { Message } from '@/types';
@@ -39,7 +40,14 @@ export default function ChatScreen() {
     const pingPresence = async () => {
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;
-      if (token) postPresence(token);
+      if (!token) return;
+      const loc = await getCurrentLocation();
+      postPresence({
+        accessToken: token,
+        latitude: loc?.latitude,
+        longitude: loc?.longitude,
+        city: loc?.city,
+      });
     };
     pingPresence();
 
@@ -53,9 +61,9 @@ export default function ChatScreen() {
   }, [userId]);
 
   const handleSend = useCallback(
-    (content: string) => {
+    (content: string, imageUri?: string) => {
       if (!userId) return;
-      sendMessage(content, userId);
+      sendMessage(content, userId, imageUri);
     },
     [userId, sendMessage]
   );
