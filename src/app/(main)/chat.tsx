@@ -26,7 +26,7 @@ export default function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
 
   const { user, signOut } = useAuthStore();
-  const { messages, isGenerating, streamingMessageId, error, startConversation, sendMessage, clearChat } =
+  const { messages, isGenerating, streamingMessageId, error, startConversation, refreshMessages, sendMessage, clearChat } =
     useChatStore();
 
   const userId = user?.id;
@@ -44,7 +44,10 @@ export default function ChatScreen() {
     pingPresence();
 
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') pingPresence();
+      if (state === 'active') {
+        pingPresence();
+        refreshMessages();
+      }
     });
     return () => sub.remove();
   }, [userId]);

@@ -10,6 +10,7 @@ interface ChatState {
   streamingMessageId: string | null;
   error: string | null;
   startConversation: (userId: string) => Promise<void>;
+  refreshMessages: () => Promise<void>;
   sendMessage: (content: string, userId: string) => Promise<void>;
   extractMemories: (userId: string) => Promise<void>;
   clearChat: () => void;
@@ -68,6 +69,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ conversationId: data.id, messages: [], error: null });
   },
 
+  refreshMessages: async () => {
+    const conversationId = get().conversationId;
+    if (!conversationId) return;
+    const { data: msgs } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (msgs) msgs.reverse();
+    set({ messages: (msgs || []) as Message[] });
+  },
+
   sendMessage: async (content, userId) => {
     const state = get();
     if (state.isGenerating) return;
@@ -82,6 +96,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ isGenerating: true, error: null });
 
     try {
+      // Pull any messages that landed server-side (e.g. scheduled pushes) so
+      // Igni sees the full context.
+      await get().refreshMessages();
+
       const { data: userMsg, error: userError } = await supabase
         .from('messages')
         .insert({ conversation_id: conversationId, role: 'user', content })
