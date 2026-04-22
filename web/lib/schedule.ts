@@ -44,34 +44,125 @@ export function getCurrentSlot(): number {
 }
 
 // ── Default schedule (96 fifteen-minute slots) ──
-// Defined per-hour then expanded to 4 slots each.
-const HOURLY_DEFAULTS: SlotBlock[] = [
-  /* 00 */ { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
-  /* 01 */ { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
-  /* 02 */ { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
-  /* 03 */ { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
-  /* 04 */ { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
-  /* 05 */ { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
-  /* 06 */ { scene: 'bedroom', primary: 'bed', secondary: 'wardrobe', label: 'waking up' },
-  /* 07 */ { scene: 'bedroom', primary: 'wardrobe', secondary: 'nightstand', label: 'getting ready' },
-  /* 08 */ { scene: 'room', primary: 'kitchen', secondary: 'fridge', label: 'breakfast' },
-  /* 09 */ { scene: 'garden', primary: 'farm_patch', secondary: 'chicken_coop', label: 'tending the garden' },
-  /* 10 */ { scene: 'garden', primary: 'chicken_coop', secondary: 'cow_pen', label: 'feeding animals' },
-  /* 11 */ { scene: 'room', primary: 'bookshelf', secondary: 'desk', label: 'reading' },
-  /* 12 */ { scene: 'room', primary: 'kitchen', secondary: 'couch', label: 'lunch break' },
-  /* 13 */ { scene: 'room', primary: 'couch', secondary: 'fridge', label: 'taking a break' },
-  /* 14 */ { scene: 'room', primary: 'desk', secondary: 'bookshelf', label: 'working' },
-  /* 15 */ { scene: 'room', primary: 'desk', secondary: 'bookshelf', label: 'working' },
-  /* 16 */ { scene: 'room', primary: 'desk', secondary: 'plant', label: 'working' },
-  /* 17 */ { scene: 'garden', primary: 'cow_pen', secondary: 'sheep_pen', label: 'checking on animals' },
-  /* 18 */ { scene: 'garden', primary: 'sheep_pen', secondary: 'farm_patch', label: 'evening rounds' },
-  /* 19 */ { scene: 'room', primary: 'couch', secondary: 'fireplace', label: 'relaxing' },
-  /* 20 */ { scene: 'room', primary: 'fireplace', secondary: 'couch', label: 'winding down' },
-  /* 21 */ { scene: 'room', primary: 'fireplace', secondary: 'floor_lamp', label: 'winding down' },
-  /* 22 */ { scene: 'bedroom', primary: 'nightstand', secondary: 'bed', label: 'getting ready for bed' },
-  /* 23 */ { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
+// Written per-slot so Igni moves and changes focus every 15 minutes instead
+// of standing around on the same piece of furniture for hours.
+const PER_SLOT_DEFAULTS: FullSchedule = [
+  // 00:00–05:45 — asleep (deep sleep, dreaming, gentle stirring near the end)
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'deep sleep' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'deep sleep' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'deep sleep' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'deep sleep' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'dreaming' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'dreaming' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'dreaming' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'dreaming' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'dreaming' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'dreaming' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'dreaming' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'dreaming' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'half-awake' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'half-awake' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'wardrobe', label: 'stirring' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'wardrobe', label: 'stirring' },
+
+  // 06:00–07:45 — waking up and getting ready
+  { scene: 'bedroom', primary: 'bed', secondary: 'wardrobe', label: 'waking up' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'stretching in bed' },
+  { scene: 'bedroom', primary: 'wardrobe', secondary: 'bed', label: 'getting out of bed' },
+  { scene: 'bedroom', primary: 'wardrobe', secondary: 'nightstand', label: 'washing up' },
+  { scene: 'bedroom', primary: 'wardrobe', secondary: 'nightstand', label: 'choosing clothes' },
+  { scene: 'bedroom', primary: 'wardrobe', secondary: 'bed', label: 'getting dressed' },
+  { scene: 'bedroom', primary: 'nightstand', secondary: 'wardrobe', label: 'tidying the nightstand' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'wardrobe', label: 'making the bed' },
+
+  // 08:00–09:45 — breakfast and morning garden
+  { scene: 'room', primary: 'kitchen', secondary: 'fridge', label: 'making coffee' },
+  { scene: 'room', primary: 'kitchen', secondary: 'fridge', label: 'cooking breakfast' },
+  { scene: 'room', primary: 'couch', secondary: 'kitchen', label: 'eating breakfast' },
+  { scene: 'room', primary: 'kitchen', secondary: 'fridge', label: 'washing up' },
+  { scene: 'garden', primary: 'farm_patch', secondary: 'chicken_coop', label: 'stepping into the garden' },
+  { scene: 'garden', primary: 'farm_patch', secondary: 'chicken_coop', label: 'weeding the farm patch' },
+  { scene: 'garden', primary: 'farm_patch', secondary: 'cow_pen', label: 'watering the vegetables' },
+  { scene: 'garden', primary: 'farm_patch', secondary: 'chicken_coop', label: 'picking vegetables' },
+
+  // 10:00–11:45 — animals, then back inside for reading
+  { scene: 'garden', primary: 'chicken_coop', secondary: 'farm_patch', label: 'feeding the chickens' },
+  { scene: 'garden', primary: 'chicken_coop', secondary: 'cow_pen', label: 'gathering eggs' },
+  { scene: 'garden', primary: 'cow_pen', secondary: 'sheep_pen', label: 'checking on the cows' },
+  { scene: 'garden', primary: 'sheep_pen', secondary: 'cow_pen', label: 'feeding the sheep' },
+  { scene: 'room', primary: 'bookshelf', secondary: 'desk', label: 'picking a book' },
+  { scene: 'room', primary: 'couch', secondary: 'bookshelf', label: 'reading on the couch' },
+  { scene: 'room', primary: 'bookshelf', secondary: 'couch', label: 'shelving books' },
+  { scene: 'room', primary: 'plant', secondary: 'bookshelf', label: 'watering the plant' },
+
+  // 12:00–13:45 — lunch and a slow break
+  { scene: 'room', primary: 'kitchen', secondary: 'fridge', label: 'making lunch' },
+  { scene: 'room', primary: 'couch', secondary: 'kitchen', label: 'eating lunch' },
+  { scene: 'room', primary: 'kitchen', secondary: 'couch', label: 'clearing the table' },
+  { scene: 'room', primary: 'kitchen', secondary: 'fridge', label: 'washing dishes' },
+  { scene: 'room', primary: 'couch', secondary: 'fireplace', label: 'resting after lunch' },
+  { scene: 'room', primary: 'couch', secondary: 'bookshelf', label: 'staring at nothing' },
+  { scene: 'room', primary: 'plant', secondary: 'couch', label: 'fussing with the plant' },
+  { scene: 'room', primary: 'couch', secondary: 'plant', label: 'stretching' },
+
+  // 14:00–16:45 — work (broken up with a coffee break, references, short pauses)
+  { scene: 'room', primary: 'desk', secondary: 'bookshelf', label: 'settling in to work' },
+  { scene: 'room', primary: 'desk', secondary: 'plant', label: 'writing' },
+  { scene: 'room', primary: 'desk', secondary: 'bookshelf', label: 'working' },
+  { scene: 'room', primary: 'kitchen', secondary: 'desk', label: 'coffee break' },
+  { scene: 'room', primary: 'desk', secondary: 'bookshelf', label: 'back at the desk' },
+  { scene: 'room', primary: 'bookshelf', secondary: 'desk', label: 'looking up a reference' },
+  { scene: 'room', primary: 'desk', secondary: 'plant', label: 'deep focus' },
+  { scene: 'room', primary: 'plant', secondary: 'desk', label: 'stretching' },
+  { scene: 'room', primary: 'desk', secondary: 'bookshelf', label: 'working' },
+  { scene: 'room', primary: 'desk', secondary: 'plant', label: 'tidying the desk' },
+  { scene: 'room', primary: 'couch', secondary: 'desk', label: 'a short break on the couch' },
+  { scene: 'room', primary: 'desk', secondary: 'bookshelf', label: 'wrapping up work' },
+
+  // 17:00–18:45 — evening garden rounds and cooking dinner
+  { scene: 'garden', primary: 'farm_patch', secondary: 'cow_pen', label: 'evening rounds' },
+  { scene: 'garden', primary: 'cow_pen', secondary: 'farm_patch', label: 'feeding the cows' },
+  { scene: 'garden', primary: 'sheep_pen', secondary: 'cow_pen', label: 'checking on the sheep' },
+  { scene: 'garden', primary: 'chicken_coop', secondary: 'sheep_pen', label: 'collecting eggs' },
+  { scene: 'garden', primary: 'farm_patch', secondary: 'chicken_coop', label: 'harvesting vegetables' },
+  { scene: 'garden', primary: 'farm_patch', secondary: 'sheep_pen', label: 'pulling weeds' },
+  { scene: 'room', primary: 'kitchen', secondary: 'fridge', label: 'bringing in the harvest' },
+  { scene: 'room', primary: 'kitchen', secondary: 'fridge', label: 'cooking dinner' },
+
+  // 19:00–21:45 — winding down (TV, reading, plant, fireplace, lamp, journal)
+  { scene: 'room', primary: 'couch', secondary: 'kitchen', label: 'eating dinner' },
+  { scene: 'room', primary: 'kitchen', secondary: 'couch', label: 'clearing up' },
+  { scene: 'room', primary: 'couch', secondary: 'tv', label: 'watching tv' },
+  { scene: 'room', primary: 'tv', secondary: 'couch', label: 'watching tv' },
+  { scene: 'room', primary: 'bookshelf', secondary: 'couch', label: 'picking an evening book' },
+  { scene: 'room', primary: 'couch', secondary: 'bookshelf', label: 'reading' },
+  { scene: 'room', primary: 'plant', secondary: 'couch', label: 'tending the plant' },
+  { scene: 'room', primary: 'fireplace', secondary: 'couch', label: 'by the fire' },
+  { scene: 'room', primary: 'fireplace', secondary: 'couch', label: 'by the fire' },
+  { scene: 'room', primary: 'floor_lamp', secondary: 'couch', label: 'reading by the lamp' },
+  { scene: 'room', primary: 'desk', secondary: 'floor_lamp', label: 'journaling' },
+  { scene: 'room', primary: 'plant', secondary: 'desk', label: 'one last check on the plant' },
+
+  // 22:00–23:45 — bed prep, then back to sleep
+  { scene: 'bedroom', primary: 'wardrobe', secondary: 'nightstand', label: 'changing for bed' },
+  { scene: 'bedroom', primary: 'nightstand', secondary: 'bed', label: 'brushing teeth' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'reading in bed' },
+  { scene: 'bedroom', primary: 'nightstand', secondary: 'bed', label: 'turning off the lamp' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'settling to sleep' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
+  { scene: 'bedroom', primary: 'bed', secondary: 'nightstand', label: 'sleeping' },
 ];
 
+// Kept for auto-migration of legacy 24-entry schedules stored in localStorage.
 function expandToSlots(hourly: SlotBlock[]): FullSchedule {
   const slots: SlotBlock[] = [];
   for (const block of hourly) {
@@ -80,7 +171,7 @@ function expandToSlots(hourly: SlotBlock[]): FullSchedule {
   return slots;
 }
 
-export const DEFAULT_SCHEDULE: FullSchedule = expandToSlots(HOURLY_DEFAULTS);
+export const DEFAULT_SCHEDULE: FullSchedule = PER_SLOT_DEFAULTS;
 
 // ── Load/save with auto-migration ──
 export function loadSchedule(): FullSchedule {
@@ -196,14 +287,38 @@ export interface ScheduleBlock {
   label: string;
 }
 
+// Decor pieces aren't meaningful "activity targets" — prefer anything else
+// when substituting for a missing scheduled piece.
+const DECOR_IDS: ReadonlySet<string> = new Set([
+  'tall_plant', 'succulent', 'clock_table', 'ceiling_light', 'wall_sconce',
+  'window', 'bedroom_window', 'bedroom_door', 'hallway_door', 'front_door', 'garden_gate',
+]);
+
+// Used instead of the slot's specific label when the scheduled primary isn't
+// placed — keeps the caption honest ("pottering around" rather than
+// "feeding the chickens" while standing in an empty garden).
+const SCENE_FALLBACK_LABELS: Record<SceneId, string> = {
+  room: 'pottering around',
+  bedroom: 'in the bedroom',
+  garden: 'pottering in the garden',
+};
+
+function pickFallback(placedIds: string[], preferred: string): string {
+  if (placedIds.includes(preferred)) return preferred;
+  const interactive = placedIds.find(id => !DECOR_IDS.has(id));
+  return interactive ?? placedIds[0] ?? preferred;
+}
+
 /** Get current schedule block, falling back to placed furniture */
 export function getScheduleBlock(placedIds: string[]): ScheduleBlock {
   const block = getSchedule()[getCurrentSlot()];
-  const has = (id: string) => placedIds.includes(id);
+  const primary = pickFallback(placedIds, block.primary);
+  const secondary = pickFallback(placedIds, block.secondary);
+  const primaryMatched = placedIds.includes(block.primary);
   return {
-    primary: has(block.primary) ? block.primary : placedIds[0] ?? block.primary,
-    secondary: has(block.secondary) ? block.secondary : placedIds[0] ?? block.secondary,
-    label: block.label,
+    primary,
+    secondary,
+    label: primaryMatched ? block.label : SCENE_FALLBACK_LABELS[block.scene],
   };
 }
 

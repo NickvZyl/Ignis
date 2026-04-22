@@ -274,13 +274,13 @@
   "wall_sconce": {
     "gridW": 1,
     "gridH": 1,
-    "spotDx": 3.5,
-    "spotDy": 8,
+    "spotDx": 0.25,
+    "spotDy": 9,
     "overhang": {
-      "left": 1,
-      "top": 1,
-      "right": 1,
-      "bottom": 1
+      "left": 0.75,
+      "right": 0.75,
+      "top": 0.75,
+      "bottom": 0.75
     }
   },
   "window": {
@@ -296,7 +296,7 @@
     }
   },
   "kitchen": {
-    "gridW": 8,
+    "gridW": 7,
     "gridH": 3,
     "spotDx": 3.5,
     "spotDy": 2.25,

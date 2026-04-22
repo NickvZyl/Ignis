@@ -118,6 +118,22 @@ export async function POST(req: NextRequest) {
     const isSleeping = scheduleLabel === 'sleeping';
     const hoursSinceLastMsg = ctx.hours_since_last_message || 0;
 
+    // ── 0. Log activity transition server-side (idempotent — no-op if
+    // the current open entry already matches scene+furniture). Without this,
+    // activity_log only grows when the browser is open; cron ticks would never
+    // populate it, starving activity_recall of data.
+    try {
+      await supabase.rpc('log_server_activity_transition', {
+        target_user_id: USER_ID,
+        p_scene: scheduleScene,
+        p_furniture: scheduleFurniture,
+        p_label: scheduleLabel,
+        p_emotion: emotion?.active_emotion || null,
+      });
+    } catch (e) {
+      console.error('[life] activity transition failed:', e);
+    }
+
     // ── 1. Environmental emotion update (every call, ~15 min) ──
     if (emotion && !isSleeping) {
       const hour = new Date().getHours();

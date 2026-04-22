@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getAnthropic, withRetry, Anthropic } from '@/lib/anthropic';
 import { CONFIG } from '@/constants/config';
 import { logLLMCall } from '@/lib/llm/logger';
+import { sendPushToUser } from '@/lib/push';
 
 const DREAM_SECRET = process.env.DREAM_CRON_SECRET || 'igni-dream-key';
 const USER_ID = '92d65536-f35b-464c-9898-372e0a899f7c';
@@ -149,6 +150,20 @@ Do NOT include any [CHECKIN:], [GOTO:], or other tags. Just the message text.`);
     if (saveError) {
       return Response.json({ error: `Save failed: ${saveError.message}` }, { status: 500 });
     }
+
+    // Fire push to registered devices. Fire-and-forget — a push failure
+    // shouldn't fail the save. First ~140 chars of the message, trimmed at a
+    // word boundary so we don't cut mid-syllable.
+    const preview =
+      message.length <= 140
+        ? message
+        : message.slice(0, 140).replace(/\s+\S*$/, '') + '…';
+    sendPushToUser(USER_ID, {
+      body: preview,
+      data: { type: 'proactive', conversationId, messageId: msgId },
+    }).catch((err) => {
+      console.warn('[proactive] push send failed:', err?.message ?? err);
+    });
 
     return Response.json({
       success: true,

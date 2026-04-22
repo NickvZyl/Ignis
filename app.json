@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Ignis",
-    "slug": "Ignis",
+    "name": "Igni",
+    "slug": "igni",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -11,8 +11,10 @@
       "icon": "./assets/expo.icon"
     },
     "android": {
+      "package": "com.meetigni.igni",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#1A0A02",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -40,6 +42,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "681a4c66-b1db-4d84-b172-48a8f21604c6"
+      }
+    },
+    "owner": "nickvzs-organization"
   }
 }

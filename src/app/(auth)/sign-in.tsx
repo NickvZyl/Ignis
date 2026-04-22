@@ -23,7 +23,7 @@ export default function SignIn() {
     try {
       await signIn(email.trim(), password);
     } catch (error: any) {
-      Alert.alert('Sign In Failed', error.message);
+      Alert.alert('Sign In Failed', String(error?.message ?? error));
     }
   };
 

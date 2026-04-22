@@ -31,9 +31,10 @@ export const useActivityStore = create<ActivityState>((set, get) => ({
     const current = entries.find(e => !e.ended_at) || null;
     set({ todayEntries: entries, currentEntry: current });
 
-    // Cleanup: delete entries older than 7 days (fire and forget)
+    // Cleanup: delete entries older than 30 days (fire and forget).
+    // Bumped from 7 → 30 so activity_recall has month-range data to surface.
     const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - 7);
+    cutoff.setDate(cutoff.getDate() - 30);
     supabase
       .from('activity_log')
       .delete()

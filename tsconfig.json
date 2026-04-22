@@ -12,9 +12,17 @@
     }
   },
   "include": [
-    "**/*.ts",
-    "**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "web",
+    "scripts",
+    "backup-src-*",
+    ".expo",
+    "dist"
   ]
 }

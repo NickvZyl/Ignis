@@ -41,6 +41,12 @@ web/.next/
 .playwright-mcp/
 kitchen_resp.json
 .vscode/
+backup-src-*/
+
+# Firebase / FCM (project-specific, not secret but noisy in diffs)
+google-services.json
+fcm-service-account.json
+GoogleService-Info.plist
 
 # typescript
 *.tsbuildinfo

@@ -1,0 +1,32 @@
+# EAS-specific ignore — only exclude what the mobile build doesn't need.
+# This extends .gitignore for upload purposes.
+
+# Web Next.js app (separate project)
+web/
+
+# Supabase migrations (applied via MCP, not needed in mobile build)
+supabase/
+
+# Scripts (server-side tools)
+scripts/
+
+# Backups
+backup-src-*/
+
+# Screenshots, temp artifacts
+*.png
+kitchen_resp.json
+visual-sim.html
+ignis-chat-sim.html
+MIGRATION_NOTES.md
+
+# Dev/temp
+.playwright-mcp/
+.vscode/
+.claude/
+
+# Memory / local state
+memory/
+
+# But keep app assets
+!assets/images/*.png

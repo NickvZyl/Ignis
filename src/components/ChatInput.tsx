@@ -6,6 +6,7 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '@/constants/ignisColors';
 
 interface Props {
@@ -15,6 +16,7 @@ interface Props {
 
 export default function ChatInput({ onSend, disabled }: Props) {
   const [text, setText] = useState('');
+  const insets = useSafeAreaInsets();
 
   const handleSend = () => {
     const trimmed = text.trim();
@@ -24,7 +26,7 @@ export default function ChatInput({ onSend, disabled }: Props) {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingBottom: 8 + insets.bottom }]}>
       <TextInput
         style={styles.input}
         value={text}
@@ -65,7 +67,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: COLORS.border,
     backgroundColor: COLORS.background,

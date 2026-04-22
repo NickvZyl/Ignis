@@ -13,6 +13,7 @@ import {
   WEB_SEARCH_SERVER_TOOL,
   type ClientToolDef,
 } from '@/lib/llm/tools';
+import { RECALL_TOOLS } from '@/lib/llm/recall-tools';
 import { CONFIG } from '@/constants/config';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -464,7 +465,7 @@ export async function POST(req: NextRequest) {
   const cachedStatic = buildCachedStaticPrompt();
 
   const db = accessToken ? getSupabaseForUser(accessToken) : null;
-  const registry = buildRegistry([...TODO_TOOLS, ...SCHEDULE_TOOLS, ...IDEA_TOOLS]);
+  const registry = buildRegistry([...TODO_TOOLS, ...SCHEDULE_TOOLS, ...IDEA_TOOLS, ...RECALL_TOOLS]);
 
   const anthropicTools: Anthropic.ToolUnion[] = toolsForAnthropic(registry);
   const webSearchEnabled = (process.env.LLM_WEB_SEARCH_ENABLED ?? 'true') !== 'false';

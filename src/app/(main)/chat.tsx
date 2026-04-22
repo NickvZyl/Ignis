@@ -5,62 +5,33 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  AppState,
   TouchableOpacity,
   Text,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import Avatar from '@/components/Avatar';
 import ChatBubble from '@/components/ChatBubble';
 import ChatInput from '@/components/ChatInput';
 import TypingIndicator from '@/components/TypingIndicator';
 import { useChatStore } from '@/stores/chat-store';
-import { useCompanionStore } from '@/stores/companion-store';
 import { useAuthStore } from '@/stores/auth-store';
+import { registerForPush } from '@/lib/push';
 import { COLORS } from '@/constants/ignisColors';
 import type { Message } from '@/types';
 
 export default function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
-  const appState = useRef(AppState.currentState);
 
   const { user, signOut } = useAuthStore();
-  const { messages, isGenerating, streamingMessageId, error, startConversation, sendMessage, extractMemories, clearChat } =
+  const { messages, isGenerating, streamingMessageId, error, startConversation, sendMessage, clearChat } =
     useChatStore();
-  const { loadState, applySessionStart } = useCompanionStore();
 
   const userId = user?.id;
 
-  // Initialize on mount
   useEffect(() => {
     if (!userId) return;
-
-    const init = async () => {
-      await loadState(userId);
-      await applySessionStart();
-      await startConversation(userId);
-    };
-
-    init();
-  }, [userId]);
-
-  // Handle app state changes for memory extraction
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (
-        appState.current.match(/active/) &&
-        nextAppState.match(/inactive|background/)
-      ) {
-        // App going to background — extract memories
-        if (userId) {
-          extractMemories(userId);
-        }
-      }
-      appState.current = nextAppState;
-    });
-
-    return () => subscription.remove();
+    startConversation(userId);
+    registerForPush(userId).catch((e) => console.warn('[push] registration failed', e));
   }, [userId]);
 
   const handleSend = useCallback(
@@ -72,9 +43,6 @@ export default function ChatScreen() {
   );
 
   const handleSignOut = async () => {
-    if (userId) {
-      await extractMemories(userId);
-    }
     clearChat();
     await signOut();
     router.replace('/(auth)/sign-in');
@@ -87,7 +55,6 @@ export default function ChatScreen() {
 
   const keyExtractor = useCallback((item: Message) => item.id, []);
 
-  // Inverted FlatList expects newest-first
   const reversedMessages = [...messages].reverse();
 
   return (
@@ -97,22 +64,19 @@ export default function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={0}
       >
-        {/* Header */}
         <View style={styles.header}>
-          <Avatar />
+          <Text style={styles.headerTitle}>Ignis</Text>
           <TouchableOpacity style={styles.signOutBtn} onPress={handleSignOut}>
             <Text style={styles.signOutText}>Sign Out</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Error banner */}
         {error && (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{error}</Text>
           </View>
         )}
 
-        {/* Messages */}
         <FlatList
           ref={flatListRef}
           data={reversedMessages}
@@ -123,7 +87,6 @@ export default function ChatScreen() {
           ListHeaderComponent={isGenerating && !streamingMessageId ? <TypingIndicator /> : null}
         />
 
-        {/* Input */}
         <ChatInput onSend={handleSend} disabled={isGenerating} />
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -139,14 +102,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
-    position: 'relative',
+  },
+  headerTitle: {
+    color: '#F59E0B',
+    fontSize: 22,
+    fontWeight: '700',
   },
   signOutBtn: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
