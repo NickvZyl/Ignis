@@ -46,9 +46,8 @@ language plpgsql
 security definer
 set search_path = public
 as $$
-declare
-  claimed_ids uuid[];
 begin
+  return query
   with due as (
     select p.id
     from public.scheduled_pushes p
@@ -57,17 +56,15 @@ begin
     order by p.scheduled_for
     limit batch_size
     for update skip locked
+  ),
+  claimed as (
+    update public.scheduled_pushes p
+    set sent_at = now()  -- provisional; process_scheduled will overwrite on failure
+    from due
+    where p.id = due.id
+    returning p.id, p.user_id, p.body, p.title
   )
-  update public.scheduled_pushes p
-  set sent_at = now()  -- provisional; process_scheduled will overwrite on failure
-  from due
-  where p.id = due.id
-  returning p.id into claimed_ids;
-
-  return query
-  select p.id, p.user_id, p.body, p.title
-  from public.scheduled_pushes p
-  where p.id = any(claimed_ids);
+  select claimed.id, claimed.user_id, claimed.body, claimed.title from claimed;
 end;
 $$;
 
