@@ -38,6 +38,16 @@ export async function POST(req: NextRequest) {
 
   for (const row of rows) {
     try {
+      // Persist the message in the active conversation first, so the user
+      // sees it in their chat history regardless of push delivery.
+      const { error: saveError } = await supabase.rpc('save_scheduled_push_message', {
+        target_user_id: row.user_id,
+        content: row.body,
+      });
+      if (saveError) {
+        console.warn('[process-scheduled] save message failed:', saveError.message);
+      }
+
       const r = await sendPushToUser(row.user_id, {
         title: row.title ?? undefined,
         body: row.body,
